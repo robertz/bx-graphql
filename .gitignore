@@ -1,0 +1,24 @@
+# CommandBox / BoxLang dependencies
+boxlang_modules/
+testbox/
+.tmp/
+.artifacts/
+.engine/
+
+# TestBox output
+tests/results/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Env / secrets
+.env

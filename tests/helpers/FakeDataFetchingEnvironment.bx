@@ -1,0 +1,46 @@
+/**
+ * Stands in for graphql.schema.DataFetchingEnvironment so DataFetcherAdapter can be
+ * unit-tested without spinning up a real graphql-java engine. BoxLang dispatches
+ * method calls dynamically, so a plain class exposing the handful of methods
+ * DataFetcherAdapter.get() actually calls — getField(), getSource(), getArguments(),
+ * getContext() — is indistinguishable to it from the real Java type.
+ *
+ * getField() returns `this`, since the real environment.getField() itself just needs
+ * to answer getName() — no separate fake field class required.
+ */
+class {
+
+	function init(
+		required string fieldName,
+		any source = "",
+		struct args = {},
+		any context = ""
+	){
+		variables.fieldName = arguments.fieldName;
+		variables.source    = arguments.source;
+		variables.args      = arguments.args;
+		variables.context   = arguments.context;
+		return this;
+	}
+
+	any function getField(){
+		return this;
+	}
+
+	string function getName(){
+		return variables.fieldName;
+	}
+
+	any function getSource(){
+		return variables.source;
+	}
+
+	struct function getArguments(){
+		return variables.args;
+	}
+
+	any function getContext(){
+		return variables.context;
+	}
+
+}

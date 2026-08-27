@@ -1,0 +1,18 @@
+/**
+ * Resolves and caches graphql-java class handles. No engine-detection branch here (unlike
+ * the ColdBox edition) — BoxLang's native module system auto-loads this module's lib/
+ * jars onto the same classloader createObject("java", ...) and createDynamicProxy() both
+ * use, so plain createObject() is always safe.
+ */
+class singleton {
+
+	variables.classCache = {};
+
+	any function create( required string className ){
+		if( !structKeyExists( variables.classCache, arguments.className ) ){
+			variables.classCache[ arguments.className ] = createObject( "java", arguments.className );
+		}
+		return variables.classCache[ arguments.className ];
+	}
+
+}

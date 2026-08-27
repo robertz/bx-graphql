@@ -1,0 +1,15 @@
+class {
+
+	any function widget( any source, required struct args, required any context, required any env ){
+		return {
+			"id"          : arguments.args.id,
+			"name"        : "Test Widget",
+			"description" : "A widget used for module tests."
+		};
+	}
+
+	any function meta( any source, required struct args, required any context, required any env ){
+		return { "version" : "0.1.0" };
+	}
+
+}

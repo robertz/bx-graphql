@@ -1,0 +1,72 @@
+/**
+ * Config-validation specs for GraphQLService.buildSchema()/validateSettings(). Each test
+ * builds its own instance with a deliberately bad config and asserts on the resulting
+ * failure — cheap to do here since (unlike the ColdBox edition) there's no shared
+ * WireBox-managed singleton to avoid disturbing.
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function run(){
+		describe( "GraphQLService config validation", function(){
+
+			it( "fails fast when schemaPaths is missing entirely", function(){
+				expect( function(){
+					buildServiceWithSettings( { "resolverBasePackage" : getRealResolverBasePackage() } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+			} );
+
+			it( "fails fast when resolverBasePackage is missing entirely", function(){
+				expect( function(){
+					buildServiceWithSettings( { "schemaPaths" : getRealSchemaPaths() } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+			} );
+
+			it( "fails fast when a configured schema file does not exist", function(){
+				expect( function(){
+					buildServiceWithSettings( {
+						"schemaPaths"         : [ "/does/not/exist.graphqls" ],
+						"resolverBasePackage" : getRealResolverBasePackage()
+					} );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+			} );
+
+			it( "fails fast when a wildcard schemaPaths entry's directory doesn't exist", function(){
+				// Regression test: this used to silently resolve to zero files for that one
+				// entry instead of throwing, as long as at least one other schemaPaths entry
+				// resolved successfully.
+				expect( function(){
+					buildServiceWithSettings( {
+						"schemaPaths"         : [ getRealSchemaPaths()[ 1 ], "/does/not/exist/*.graphqls" ],
+						"resolverBasePackage" : getRealResolverBasePackage()
+					} );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+			} );
+
+			it( "still builds successfully with valid settings (sanity check on the test harness itself)", function(){
+				expect( function(){
+					buildServiceWithSettings( {
+						"schemaPaths"         : getRealSchemaPaths(),
+						"resolverBasePackage" : getRealResolverBasePackage()
+					} );
+				} ).notToThrow();
+			} );
+
+		} );
+	}
+
+	private array function getRealSchemaPaths(){
+		// Relative to the repo root: expandPath() always resolves relative to the entry
+		// point of the running script (run-tests.bxs), not to this file — see
+		// GraphQLServiceSpec.bx's beforeAll() comment.
+		return [ expandPath( "tests/resources/test-schema.graphqls" ) ];
+	}
+
+	private string function getRealResolverBasePackage(){
+		return expandPath( "tests/resources/resolvers" );
+	}
+
+	private any function buildServiceWithSettings( required struct settings ){
+		return new "../../models/GraphQLService"( arguments.settings );
+	}
+
+}

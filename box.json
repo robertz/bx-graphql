@@ -1,0 +1,46 @@
+{
+    "name":"BxGraphQL",
+    "version":"0.1.0",
+    "author":"Robert Zehnder",
+    "slug":"bx-graphql",
+    "shortDescription":"Schema-agnostic GraphQL server for native BoxLang, wrapping graphql-java.",
+    "type":"boxlang-modules",
+    "keywords":[
+        "boxlang",
+        "graphql",
+        "graphql-java"
+    ],
+    "homepage":"https://github.com/robertz/bx-graphql",
+    "repository":{
+        "type":"git",
+        "URL":"https://github.com/robertz/bx-graphql"
+    },
+    "boxlang":{
+        "minimumVersion":"1.15.0",
+        "moduleName":"bxgraphql"
+    },
+    "private":false,
+    "license":[
+        {
+            "type":"MIT",
+            "URL":"https://opensource.org/licenses/MIT"
+        }
+    ],
+    "devDependencies":{
+        "testbox":"^7.0.0"
+    },
+    "installPaths":{
+        "testbox":"testbox/"
+    },
+    "scripts":{
+        "preVersion":"!boxlang run-tests.bxs"
+    },
+    "ignore":[
+        "**/.*",
+        "tests/**",
+        "testbox/**",
+        "boxlang_modules/**",
+        "run-tests.bxs",
+        "setup-tests.bxs"
+    ]
+}

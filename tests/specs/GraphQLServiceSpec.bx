@@ -1,0 +1,72 @@
+/**
+ * Integration specs: builds a real GraphQLService against tests/resources/test-schema.graphqls,
+ * wired to the fixture resolvers in tests/resources/resolvers/, and executes real queries
+ * end-to-end through graphql-java.
+ *
+ * Requires this module to be loadable as a real BoxLang module (see setup-tests.bxs) —
+ * that's the only way JavaClassFactory's createObject("java", "graphql...") calls can
+ * see the jars under libs/.
+ *
+ * schemaPaths/resolverBasePackage are pre-resolved with expandPath() here, relative to
+ * the repo root — expandPath() (whether called here or inside GraphQLService itself)
+ * always resolves relative to the entry point of the running script, which for the test
+ * suite is run-tests.bxs at the repo root, not the file the expandPath() call sits in
+ * (confirmed empirically; see GraphQLService.normalizeResolverBasePackage()'s docstring).
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		variables.graphQLService = new "../../models/GraphQLService"( {
+			"schemaPaths"         : [ expandPath( "tests/resources/test-schema.graphqls" ) ],
+			"resolverBasePackage" : expandPath( "tests/resources/resolvers" )
+		} );
+	}
+
+	function run(){
+		describe( "GraphQLService", function(){
+
+			it( "resolves a scalar field via the PropertyDataFetcher fallback when no resolver method exists", function(){
+				var result = variables.graphQLService.execute( '{ widget(id: "1") { description } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.description ).toBe( "A widget used for module tests." );
+			} );
+
+			it( "invokes the explicit resolver method in precedence over the PropertyDataFetcher fallback", function(){
+				var result = variables.graphQLService.execute( '{ widget(id: "1") { name upperName } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.name ).toBe( "Test Widget" );
+				expect( result.data.widget.upperName ).toBe( "TEST WIDGET" );
+			} );
+
+			it( "falls back correctly when no resolver class exists at all for the type", function(){
+				var result = variables.graphQLService.execute( "{ meta { version } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.meta.version ).toBe( "0.1.0" );
+			} );
+
+			it( "threads query variables through to resolver arguments (regression: variables were dropped before toJavaMap())", function(){
+				var result = variables.graphQLService.execute(
+					query         = "query( $widgetId: ID! ){ widget(id: $widgetId ) { id } }",
+					queryVariables = { "widgetId" : "42" }
+				);
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.id ).toBe( "42" );
+			} );
+
+			it( "produces a properly formatted error response for an invalid query", function(){
+				var result = variables.graphQLService.execute( '{ widget(id: "1") { doesNotExist } }' );
+
+				expect( isNull( result.data ) || isSimpleValue( result.data ) ).toBeTrue();
+				expect( result.errors ).toBeArray();
+				expect( arrayLen( result.errors ) ).toBeGT( 0 );
+				expect( result.errors[ 1 ] ).toBeTypeOf( "string" );
+			} );
+
+		} );
+	}
+
+}

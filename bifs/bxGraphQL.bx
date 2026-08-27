@@ -1,0 +1,19 @@
+/**
+ * Global factory BIF, registered automatically when this module loads.
+ * Equivalent to `new bxModules.bxgraphql.models.GraphQLService( settings )` — the
+ * friendliest entry point for building the engine.
+ *
+ *   graphQLService = bxGraphQL( {
+ *       schemaPaths         : [ expandPath( "/graphql/schema" ) ],
+ *       resolverBasePackage : "models.resolvers"
+ *   } )
+ *   result = graphQLService.execute( '{ widget(id: "1") { name } }' )
+ */
+@BoxBIF
+class {
+
+	function invoke( settings ) {
+		return new bxModules.bxgraphql.models.GraphQLService( arguments.settings )
+	}
+
+}

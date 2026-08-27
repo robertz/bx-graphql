@@ -1,0 +1,60 @@
+/**
+ * Unit specs for DataFetcherAdapter's resolver dispatch, isolated from the graphql-java
+ * engine via FakeDataFetchingEnvironment. Exercises the resolver convention directly
+ * against the real fixtures in tests/resources/resolvers/ (QueryResolver.bx defines
+ * widget/meta, WidgetResolver.bx defines only upperName).
+ *
+ * The PropertyDataFetcher-fallback path (no resolver class, or resolver class missing
+ * the field) isn't exercised here: graphql-java's real PropertyDataFetcher.get() calls
+ * more of the DataFetchingEnvironment interface than the fake implements (e.g.
+ * getFieldType()), even proxied via createDynamicProxy — that fallback is covered
+ * end-to-end instead, in GraphQLServiceSpec.
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		variables.javaClass = new "../../models/JavaClassFactory"();
+		// Relative to the repo root: expandPath() always resolves relative to the entry
+		// point of the running script (run-tests.bxs), not to this file — see
+		// GraphQLServiceSpec.bx's beforeAll() comment.
+		variables.resolverBasePackage = expandPath( "tests/resources/resolvers" );
+	}
+
+	function run(){
+		describe( "DataFetcherAdapter", function(){
+
+			it( "invokes the matching resolver method when the resolver class defines it", function(){
+				var adapter = newAdapter( "Widget" );
+				var env     = new "../helpers/FakeDataFetchingEnvironment"(
+					fieldName = "upperName",
+					source    = { "name" : "hello" }
+				);
+
+				expect( adapter.get( env ) ).toBe( "HELLO" );
+			} );
+
+			it( "passes deserialized arguments, source, and context through to the resolver method", function(){
+				var adapter = newAdapter( "Query" );
+				var env     = new "../helpers/FakeDataFetchingEnvironment"(
+					fieldName = "widget",
+					args      = { "id" : "99" }
+				);
+
+				var result = adapter.get( env );
+
+				expect( result.id ).toBe( "99" );
+				expect( result.name ).toBe( "Test Widget" );
+			} );
+
+		} );
+	}
+
+	private any function newAdapter( required string typeName ){
+		return new "../../models/DataFetcherAdapter"(
+			typeName            = arguments.typeName,
+			resolverBasePackage = variables.resolverBasePackage,
+			javaClass           = variables.javaClass
+		);
+	}
+
+}

@@ -1,0 +1,197 @@
+/**
+ * Builds and holds the graphql.GraphQL engine: parses/merges the consumer's SDL files
+ * and wires convention-based DataFetchers. Built once at construction time — not per
+ * request. No WireBox; settings are passed directly to init().
+ *
+ * Deferred (not implemented in this spike): custom scalars, interface/union TypeResolver
+ * wiring, introspection toggle.
+ */
+class {
+
+	property name="settings";
+
+	variables.javaClass = "";
+	variables.engine    = "";
+
+	function init( required struct settings ){
+		variables.settings  = arguments.settings;
+		variables.javaClass = new "JavaClassFactory"();
+		buildSchema();
+		return this;
+	}
+
+	any function getEngine(){
+		return variables.engine;
+	}
+
+	any function getSchema(){
+		return variables.engine.getGraphQLSchema();
+	}
+
+	/**
+	 * Executes a query/mutation and returns a plain CFML struct — {data, errors} — so
+	 * callers never need to touch graphql-java classes directly.
+	 */
+	struct function execute( required string query, struct queryVariables = {}, any context = "" ){
+		var executionInputBuilder = variables.javaClass.create( "graphql.ExecutionInput" )
+			.newExecutionInput()
+			.query( arguments.query )
+			.context( arguments.context )
+
+		if( !structIsEmpty( arguments.queryVariables ) ){
+			executionInputBuilder = executionInputBuilder.variables( toJavaMap( arguments.queryVariables ) )
+		}
+
+		var result = variables.engine.execute( executionInputBuilder.build() )
+
+		return {
+			"data"   : result.getData(),
+			"errors" : arrayMap( result.getErrors() ?: [], ( e ) => e.getMessage() )
+		};
+	}
+
+	/**
+	 * graphql-java's internal variable coercion does a plain `Map.get(String)`
+	 * lookup against whatever's passed to ExecutionInput.Builder.variables() —
+	 * a real java.util.Map, not BoxLang's own Struct type, which implements
+	 * `java.util.Map` but doesn't satisfy foreign Java code calling get() with
+	 * a plain java.lang.String key (confirmed directly: a BoxLang struct
+	 * passed straight through is non-empty and serializes fine, but every
+	 * variable in it comes back coerced to null once graphql-java tries to
+	 * read it — a real java.util.HashMap with identical contents works).
+	 * So: copy into a genuine HashMap before it ever reaches graphql-java.
+	 */
+	private any function toJavaMap( required struct source ){
+		var javaMap = variables.javaClass.create( "java.util.HashMap" ).init();
+		for( var key in arguments.source ){
+			javaMap.put( key, arguments.source[ key ] );
+		}
+		return javaMap;
+	}
+
+	private void function buildSchema(){
+		validateSettings();
+
+		var schemaFiles = resolveSchemaFiles( variables.settings.schemaPaths );
+		if( arrayLen( schemaFiles ) == 0 ){
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "schemaPaths did not resolve to any .graphqls files.",
+				detail  = "Paths checked: " & arrayToList( variables.settings.schemaPaths, ", " )
+			);
+		}
+
+		var mergedRegistry       = parseAndMergeSchemas( schemaFiles );
+		var runtimeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.RuntimeWiring" ).newRuntimeWiring();
+
+		wireResolvers( runtimeWiringBuilder, mergedRegistry );
+
+		var runtimeWiring   = runtimeWiringBuilder.build();
+		var schemaGenerator = variables.javaClass.create( "graphql.schema.idl.SchemaGenerator" ).init();
+		var graphQLSchema   = schemaGenerator.makeExecutableSchema( mergedRegistry, runtimeWiring );
+
+		variables.engine = variables.javaClass.create( "graphql.GraphQL" ).newGraphQL( graphQLSchema ).build();
+	}
+
+	private void function validateSettings(){
+		if( !structKeyExists( variables.settings, "schemaPaths" ) || !isArray( variables.settings.schemaPaths ) || arrayLen( variables.settings.schemaPaths ) == 0 ){
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "No schemaPaths configured for bx-graphql."
+			);
+		}
+		if( !len( trim( variables.settings.resolverBasePackage ?: "" ) ) ){
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "No resolverBasePackage configured for bx-graphql."
+			);
+		}
+	}
+
+	/**
+	 * resolverBasePackage follows the same convention as the ColdBox edition of this
+	 * module — a dotted package path (e.g. "models.resolvers"), resolved relative to the
+	 * consuming app's entry point. A value containing "/" is treated as an already-literal
+	 * path instead (e.g. for a resolvers folder outside any dotted package root) and left
+	 * as-is aside from expandPath().
+	 */
+	private string function normalizeResolverBasePackage( required string resolverBasePackage ){
+		var normalized = arguments.resolverBasePackage;
+		if( !find( "/", normalized ) && !find( "\", normalized ) ){
+			normalized = replace( normalized, ".", "/", "all" );
+		}
+		return expandPath( normalized );
+	}
+
+	private array function resolveSchemaFiles( required array configuredPaths ){
+		var resolved = [];
+
+		for( var rawPath in arguments.configuredPaths ){
+			var expandedPath = expandPath( rawPath );
+
+			if( directoryExists( expandedPath ) ){
+				arrayAppend( resolved, directoryList( expandedPath, false, "path", "*.graphqls" ), true );
+			} else if( find( "*", expandedPath ) ){
+				var baseDir = getDirectoryFromPath( expandedPath );
+				var filter  = getFileFromPath( expandedPath );
+				if( directoryExists( baseDir ) ){
+					arrayAppend( resolved, directoryList( baseDir, false, "path", filter ), true );
+				} else {
+					throw(
+						type    = "BxGraphQL.ConfigurationException",
+						message = "Configured schema path does not exist: " & rawPath & " (resolved directory " & baseDir & " does not exist)"
+					);
+				}
+			} else if( fileExists( expandedPath ) ){
+				arrayAppend( resolved, expandedPath );
+			} else {
+				throw(
+					type    = "BxGraphQL.ConfigurationException",
+					message = "Configured schema path does not exist: " & rawPath & " (resolved to " & expandedPath & ")"
+				);
+			}
+		}
+
+		return resolved;
+	}
+
+	private any function parseAndMergeSchemas( required array schemaFiles ){
+		var schemaParser   = variables.javaClass.create( "graphql.schema.idl.SchemaParser" ).init();
+		var mergedRegistry = variables.javaClass.create( "graphql.schema.idl.TypeDefinitionRegistry" ).init();
+
+		for( var filePath in arguments.schemaFiles ){
+			var sdl      = fileRead( filePath );
+			var registry = schemaParser.parse( sdl );
+			mergedRegistry = mergedRegistry.merge( registry );
+		}
+
+		return mergedRegistry;
+	}
+
+	private void function wireResolvers( required any runtimeWiringBuilder, required any typeRegistry ){
+		var entryIterator = arguments.typeRegistry.types().entrySet().iterator();
+
+		while( entryIterator.hasNext() ){
+			var entry = entryIterator.next();
+			if( !isInstanceOf( entry.getValue(), "graphql.language.ObjectTypeDefinition" ) ){
+				continue;
+			}
+			var typeName = entry.getKey();
+
+			var adapter = new "DataFetcherAdapter"(
+				typeName            = typeName,
+				resolverBasePackage = normalizeResolverBasePackage( variables.settings.resolverBasePackage ),
+				javaClass           = variables.javaClass
+			);
+			var dataFetcherProxy = createDynamicProxy( adapter, "graphql.schema.DataFetcher" );
+
+			var typeWiring = variables.javaClass.create( "graphql.schema.idl.TypeRuntimeWiring" )
+				.newTypeWiring( typeName )
+				.defaultDataFetcher( dataFetcherProxy )
+				.build();
+
+			arguments.runtimeWiringBuilder.type( typeWiring );
+		}
+	}
+
+}

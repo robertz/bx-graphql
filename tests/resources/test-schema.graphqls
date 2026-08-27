@@ -1,0 +1,15 @@
+type Query {
+	widget(id: ID!): Widget
+	meta: Meta
+}
+
+type Meta {
+	version: String
+}
+
+type Widget {
+	id: ID!
+	name: String
+	description: String
+	upperName: String
+}

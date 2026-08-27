@@ -1,0 +1,27 @@
+/**
+ * Exercises the bxGraphQL() global BIF for real — only resolves as a global function
+ * once BoxLang has loaded this project as an actual module, which run-tests.bxs sets up
+ * via a self-referencing boxlang_modules/bxgraphql symlink (see setup-tests.bxs).
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function run(){
+		describe( "bxGraphQL() BIF", function(){
+
+			it( "builds a working GraphQLService, equivalent to `new bxModules.bxgraphql.models.GraphQLService()`", function(){
+				var graphQLService = bxGraphQL( {
+					"schemaPaths"         : [ expandPath( "tests/resources/test-schema.graphqls" ) ],
+					"resolverBasePackage" : expandPath( "tests/resources/resolvers" )
+				} );
+
+				var result = graphQLService.execute( '{ widget(id: "1") { name upperName } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.name ).toBe( "Test Widget" );
+				expect( result.data.widget.upperName ).toBe( "TEST WIDGET" );
+			} );
+
+		} );
+	}
+
+}

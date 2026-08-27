@@ -1,0 +1,32 @@
+/**
+ * Unit specs for JavaClassFactory's class-handle cache. Uses plain JDK classes
+ * (no module load required) so these run standalone, without setup-tests.bxs.
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function run(){
+		describe( "JavaClassFactory", function(){
+
+			it( "returns a working instance for a given Java class name", function(){
+				var factory = new "../../models/JavaClassFactory"();
+				var list    = factory.create( "java.util.ArrayList" ).init();
+				list.add( "hello" );
+
+				expect( list.size() ).toBe( 1 );
+			} );
+
+			it( "resolves independently for each distinct class name", function(){
+				var factory = new "../../models/JavaClassFactory"();
+				var list    = factory.create( "java.util.ArrayList" ).init();
+				var map     = factory.create( "java.util.HashMap" ).init();
+
+				map.put( "key", "value" );
+
+				expect( list.isEmpty() ).toBeTrue();
+				expect( map.get( "key" ) ).toBe( "value" );
+			} );
+
+		} );
+	}
+
+}

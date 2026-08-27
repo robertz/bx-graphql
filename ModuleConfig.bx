@@ -1,0 +1,34 @@
+/**
+ * bx-graphql module descriptor. Schema-agnostic GraphQL server wrapping graphql-java
+ * for native BoxLang apps — no ColdBox required.
+ *
+ * The jars under lib/ are auto-loaded onto the module's classloader by BoxLang's own
+ * module system, so unlike the ColdBox edition of this module, there is no separate
+ * classloader-registration dependency (cbjavaloader) and no engine-detection branch:
+ * createObject("java", ...) and createDynamicProxy() always resolve through the same
+ * classloader here.
+ */
+class {
+
+	this.version     = "0.1.0";
+	this.mapping      = "bxgraphql";
+	this.author       = "Robert Zehnder";
+	this.description  = "Schema-agnostic GraphQL server module wrapping graphql-java.";
+	this.webURL        = "https://github.com/robertz/bx-graphql";
+	this.disabled     = false;
+
+	function configure() {
+		settings = {};
+		objectMappings = {};
+		datasources = {};
+		interceptors = [];
+		customInterceptionPoints = [];
+	}
+
+	function onLoad() {
+	}
+
+	function onUnload() {
+	}
+
+}

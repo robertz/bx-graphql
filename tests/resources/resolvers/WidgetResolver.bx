@@ -1,0 +1,8 @@
+class {
+
+	// Explicit resolver: must take precedence over PropertyDataFetcher for `upperName`.
+	string function upperName( required any source, required struct args, required any context, required any env ){
+		return ucase( arguments.source.name );
+	}
+
+}
