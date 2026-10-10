@@ -1,6 +1,6 @@
 {
     "name":"BxGraphQL",
-    "version":"0.1.0",
+    "version":"0.1.1",
     "author":"Robert Zehnder",
     "slug":"bx-graphql",
     "shortDescription":"Schema-agnostic GraphQL server for native BoxLang, wrapping graphql-java.",

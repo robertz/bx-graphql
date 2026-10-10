@@ -10,7 +10,7 @@
  */
 class {
 
-	this.version     = "0.1.0";
+	this.version     = "0.1.1";
 	this.mapping      = "bxgraphql";
 	this.author       = "Robert Zehnder";
 	this.description  = "Schema-agnostic GraphQL server module wrapping graphql-java.";
