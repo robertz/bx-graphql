@@ -57,6 +57,18 @@ class extends="testbox.system.BaseSpec" {
 				expect( result.data.widget.id ).toBe( "42" );
 			} );
 
+			it( "passes input objects and lists nested in query variables (regression: only the top level became a java.util.Map)", function(){
+				var result = variables.graphQLService.execute(
+					query          = "query( $filter: WidgetFilter! ){ search( filter: $filter ) { names ownerName ownerTags } }",
+					queryVariables = { "filter" : { "names" : [ "a", "b" ], "owner" : { "name" : "rob", "tags" : [ "x" ] } } }
+				);
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.search.names ).toBe( [ "a", "b" ] );
+				expect( result.data.search.ownerName ).toBe( "rob" );
+				expect( result.data.search.ownerTags ).toBe( [ "x" ] );
+			} );
+
 			it( "produces a properly formatted error response for an invalid query", function(){
 				var result = variables.graphQLService.execute( '{ widget(id: "1") { doesNotExist } }' );
 

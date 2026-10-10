@@ -59,14 +59,36 @@ class {
 	 * passed straight through is non-empty and serializes fine, but every
 	 * variable in it comes back coerced to null once graphql-java tries to
 	 * read it — a real java.util.HashMap with identical contents works).
-	 * So: copy into a genuine HashMap before it ever reaches graphql-java.
+	 * So: copy into a genuine HashMap before it ever reaches graphql-java —
+	 * all the way down. An input object variable is a struct nested inside
+	 * this one, and a list variable an array; left as BoxLang types, graphql-java
+	 * fails coercing them (a ClassCastException on the struct's Key keys).
 	 */
 	private any function toJavaMap( required struct source ){
-		var javaMap = variables.javaClass.create( "java.util.HashMap" ).init();
-		for( var key in arguments.source ){
-			javaMap.put( key, arguments.source[ key ] );
+		return toJavaValue( arguments.source );
+	}
+
+	/** Structs become java.util.HashMaps with String keys, arrays java.util.ArrayLists, recursively; anything else as-is. */
+	private any function toJavaValue( any value ){
+		if( isNull( arguments.value ) ){
+			return javaCast( "null", "" );
 		}
-		return javaMap;
+		if( isStruct( arguments.value ) ){
+			var javaMap = variables.javaClass.create( "java.util.HashMap" ).init();
+			for( var key in arguments.value ){
+				var member = arguments.value[ key ] ?: javaCast( "null", "" );
+				javaMap.put( toString( key ), isNull( member ) ? javaCast( "null", "" ) : toJavaValue( member ) );
+			}
+			return javaMap;
+		}
+		if( isArray( arguments.value ) ){
+			var javaList = variables.javaClass.create( "java.util.ArrayList" ).init();
+			for( var member in arguments.value ){
+				javaList.add( isNull( member ) ? javaCast( "null", "" ) : toJavaValue( member ) );
+			}
+			return javaList;
+		}
+		return arguments.value;
 	}
 
 	private void function buildSchema(){

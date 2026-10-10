@@ -1,6 +1,24 @@
 type Query {
 	widget(id: ID!): Widget
 	meta: Meta
+	search(filter: WidgetFilter!): SearchEcho
+}
+
+input WidgetFilter {
+	names: [String!]!
+	owner: OwnerFilter
+}
+
+input OwnerFilter {
+	name: String!
+	tags: [String!]
+}
+
+"Echoes back what search() received, so tests can see nested variables arrive intact."
+type SearchEcho {
+	names: [String]
+	ownerName: String
+	ownerTags: [String]
 }
 
 type Meta {

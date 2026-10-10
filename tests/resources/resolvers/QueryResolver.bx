@@ -12,4 +12,13 @@ class {
 		return { "version" : "0.1.0" };
 	}
 
+	any function search( any source, required struct args, required any context, required any env ){
+		var filter = arguments.args.filter;
+		return {
+			"names"     : filter.names,
+			"ownerName" : filter.owner.name,
+			"ownerTags" : filter.owner.tags
+		};
+	}
+
 }
