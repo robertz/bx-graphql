@@ -40,6 +40,7 @@
         "tests/**",
         "testbox/**",
         "boxlang_modules/**",
+        "PLAN.md",
         "run-tests.bxs",
         "setup-tests.bxs"
     ]
