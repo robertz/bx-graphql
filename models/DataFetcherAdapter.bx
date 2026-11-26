@@ -19,6 +19,7 @@ class {
 	property name="typeName";
 	property name="resolverBasePackage";
 	property name="javaClass";
+	property name="classFiles";
 
 	variables.resolverInstance         = "";
 	variables.hasResolver              = false;
@@ -28,8 +29,10 @@ class {
 	function init(
 		required string typeName,
 		required string resolverBasePackage,
-		required any javaClass
+		required any javaClass,
+		any classFiles
 	){
+		variables.classFiles          = arguments.classFiles ?: new "ClassFiles"();
 		variables.typeName            = arguments.typeName;
 		variables.resolverBasePackage = arguments.resolverBasePackage;
 		variables.javaClass           = arguments.javaClass;
@@ -92,7 +95,7 @@ class {
 			return;
 		}
 
-		variables.resolverInstance = new "ClassFiles"().instantiate( resolverPath );
+		variables.resolverInstance = variables.classFiles.build( resolverPath, "resolver" );
 		variables.hasResolver      = true;
 	}
 

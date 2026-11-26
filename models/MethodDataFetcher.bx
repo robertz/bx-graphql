@@ -1,64 +1,134 @@
 /**
- * The DataFetcher behind one generated Query/Mutation field: calls the service method
- * it was generated from. Wrapped as a graphql.schema.DataFetcher via createDynamicProxy.
+ * The DataFetcher behind one generated field: calls the function it was generated from.
+ * Wrapped as a graphql.schema.DataFetcher via createDynamicProxy.
+ *
+ * For a Query/Mutation field the function is a service's, on the one instance built at
+ * startup. For a bean's @graphqlField function it's called on the field's source.
  *
  * Each GraphQL argument goes to the parameter of the same name; one left out isn't
  * passed, so the function's own default applies. Parameters named `context` and `env`
- * get what a resolver's would. An argument for a parameter typed as an @graphqlInput
- * class arrives as an instance of it, set through its setters.
+ * get what a resolver's would, and `args` the arguments as plain structs and arrays —
+ * the one place an explicit null can be told from a key that was left out.
+ *
+ * An argument for a parameter typed as an @graphqlInput class arrives as an instance of
+ * it, set through its setters; so do the beans nested in it and lists of them.
  */
 class {
 
-	variables.instance   = "";
-	variables.methodName = "";
-	variables.parameters = [];
-	variables.models     = {};
-	variables.classFiles = "";
+	variables.instance      = "";
+	variables.operation     = {};
+	variables.models        = {};
+	variables.classFiles    = "";
+	variables.authorizer    = "";
 
-	function init( required any instance, required string methodName, required array parameters, required struct models, required any classFiles ){
+	/**
+	 * @instance The service instance, or "" to call the function on the field's source.
+	 * @operation As SchemaGenerator.generate() lists it.
+	 * @authorizer settings.authorizer, or "" for none.
+	 */
+	function init( required any instance, required struct operation, required struct models, required any classFiles, required any authorizer ){
 		variables.instance   = arguments.instance;
-		variables.methodName = arguments.methodName;
-		variables.parameters = arguments.parameters;
+		variables.operation  = arguments.operation;
 		variables.models     = arguments.models;
 		variables.classFiles = arguments.classFiles;
+		variables.authorizer = arguments.authorizer;
 		return this;
 	}
 
 	any function get( required any environment ){
-		var given     = JSONDeserialize( JSONSerialize( arguments.environment.getArguments() ) );
-		var collected = {};
+		var given  = JSONDeserialize( JSONSerialize( arguments.environment.getArguments() ) );
+		var target = variables.instance;
 
-		for( var parameter in variables.parameters ){
+		if( variables.operation.guarded ){
+			var allowed = variables.authorizer( variables.operation.requirement, arguments.environment.getContext(), {
+				"type"  : variables.operation.rootType,
+				"field" : variables.operation.fieldName,
+				"args"  : given
+			} );
+			if( isNull( allowed ) || !isBoolean( allowed ) || !allowed ){
+				throw( type = "BxGraphQL.NotAuthorized", message = "Not authorized: #variables.operation.rootType#.#variables.operation.fieldName#" );
+			}
+		}
+
+		if( isSimpleValue( target ) ){
+			target = arguments.environment.getSource();
+			// a resolver may have returned a struct for this type rather than the bean
+			if( isNull( target ) || !isObject( target ) || !structKeyExists( target, variables.operation.methodName ) ){
+				return isStruct( target ?: "" ) ? ( target[ variables.operation.fieldName ] ?: javaCast( "null", "" ) ) : javaCast( "null", "" );
+			}
+		}
+
+		var collected = {};
+		for( var parameter in variables.operation.parameters ){
 			if( parameter.name == "context" ){
 				collected[ parameter.name ] = arguments.environment.getContext();
 			} else if( parameter.name == "env" ){
 				collected[ parameter.name ] = arguments.environment;
+			} else if( parameter.name == "args" ){
+				collected[ parameter.name ] = given;
 			} else if( structKeyExists( given, parameter.name ) && !isNull( given[ parameter.name ] ) ){
-				collected[ parameter.name ] = hydrate( given[ parameter.name ], parameter.type ?: "any" );
+				collected[ parameter.name ] = hydrate( given[ parameter.name ], parameter.type ?: "any", parameter.annotations.graphqlType ?: "" );
 			}
 		}
 
-		return invoke( variables.instance, variables.methodName, collected );
+		return invoke( target, variables.operation.methodName, collected );
 	}
 
-	private any function hydrate( required any value, required string boxType ){
-		if( right( arguments.boxType, 2 ) == "[]" && isArray( arguments.value ) ){
-			var itemType = left( arguments.boxType, len( arguments.boxType ) - 2 );
-			return arguments.value.map( ( item ) => isNull( item ) ? javaCast( "null", "" ) : hydrate( item, itemType ) );
+	/**
+	 * @boxType The parameter's or property's BoxLang type: "Widget", "Widget[]", "array"...
+	 * @sdlType Its GraphQL type where an annotation stated one ("[TagInput!]"), else "":
+	 *          how a list typed plain `array` is known to hold input beans.
+	 */
+	private any function hydrate( required any value, required string boxType, required string sdlType ){
+		if( isArray( arguments.value ) ){
+			var itemModel = right( arguments.boxType, 2 ) == "[]"
+				? inputModelFor( left( arguments.boxType, len( arguments.boxType ) - 2 ) )
+				: inputModelNamed( reReplace( arguments.sdlType, "[\[\]!\s]", "", "all" ) );
+			if( structIsEmpty( itemModel ) ){
+				return arguments.value;
+			}
+			return arguments.value.map( ( item ) => isNull( item ) || !isStruct( item ) ? ( item ?: javaCast( "null", "" ) ) : beanFrom( item, itemModel ) );
 		}
 
+		if( isStruct( arguments.value ) ){
+			var model = inputModelFor( arguments.boxType );
+			return structIsEmpty( model ) ? arguments.value : beanFrom( arguments.value, model );
+		}
+
+		return arguments.value;
+	}
+
+	private struct function inputModelFor( required string boxType ){
 		var simpleName = listLast( arguments.boxType, "." );
-		if( !isStruct( arguments.value ) || !structKeyExists( variables.models, simpleName ) || !len( variables.models[ simpleName ].inputName ) ){
-			return arguments.value;
+		if( structKeyExists( variables.models, simpleName ) && len( variables.models[ simpleName ].inputName ) ){
+			return variables.models[ simpleName ];
 		}
+		return {};
+	}
 
-		var model = variables.models[ simpleName ];
-		var bean  = variables.classFiles.instantiate( model.classPath );
-		for( var property in model.meta.properties ){
-			if( !structKeyExists( arguments.value, property.name ) || isNull( arguments.value[ property.name ] ) || !structKeyExists( bean, "set" & property.name ) ){
+	private struct function inputModelNamed( required string inputName ){
+		for( var simpleName in variables.models ){
+			if( len( arguments.inputName ) && variables.models[ simpleName ].inputName == arguments.inputName ){
+				return variables.models[ simpleName ];
+			}
+		}
+		return {};
+	}
+
+	/** A key given as null is set to null; a key left out isn't touched. */
+	private any function beanFrom( required struct values, required struct model ){
+		var bean      = variables.classFiles.build( arguments.model.classPath, "input" );
+		// structKeyExists() is false for a key whose value is null
+		var givenKeys = structKeyArray( arguments.values );
+
+		for( var property in variables.classFiles.propertiesOf( arguments.model.meta ) ){
+			if( !arrayContainsNoCase( givenKeys, property.name ) || !structKeyExists( bean, "set" & property.name ) ){
 				continue;
 			}
-			invoke( bean, "set" & property.name, [ hydrate( arguments.value[ property.name ], property.type ?: "any" ) ] );
+			var given = arguments.values[ property.name ] ?: javaCast( "null", "" );
+			invoke( bean, "set" & property.name, [
+				isNull( given ) ? javaCast( "null", "" ) : hydrate( given, property.type ?: "any", property.annotations.graphqlInputField ?: "" )
+			] );
 		}
 		return bean;
 	}

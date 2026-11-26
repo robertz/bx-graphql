@@ -1,7 +1,7 @@
 /**
  * Maps a BoxLang type name (a property's, a parameter's, a return type's) to a GraphQL
  * type name. `models` is every annotated bean, keyed by the class's simple name:
- * { typeName, inputName } with "" for the one a class isn't.
+ * { typeName, inputName, enumName } with "" for the ones a class isn't.
  */
 class {
 
@@ -46,6 +46,13 @@ class {
 		var simpleName = listLast( typeName, "." );
 		if( structKeyExists( variables.models, simpleName ) ){
 			var model = variables.models[ simpleName ];
+			// an enum's values are strings: BoxLang would refuse one for a parameter or property typed as the class
+			if( len( model.enumName ) ){
+				throw(
+					type    = "BxGraphQL.ConfigurationException",
+					message = "#arguments.where# is typed as the enum #model.enumName#. Type it string and state the GraphQL type with #arguments.overrideAnnotation#."
+				);
+			}
 			if( arguments.forInput && len( model.inputName ) ){
 				return model.inputName;
 			}

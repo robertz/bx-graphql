@@ -1,0 +1,6 @@
+@graphqlType
+class accessors="true" {
+
+	property name="colour" type="Colour";
+
+}

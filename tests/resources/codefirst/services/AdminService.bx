@@ -1,0 +1,20 @@
+@graphqlRequires( "admin" )
+class {
+
+	@graphqlQuery
+	string function secrets(){
+		return "the secrets";
+	}
+
+	@graphqlQuery
+	@graphqlRequires( "user" )
+	string function profile(){
+		return "the profile";
+	}
+
+	@graphqlMutation
+	string function fail(){
+		throw( type = "Shop.OutOfStock", message = "None left" );
+	}
+
+}

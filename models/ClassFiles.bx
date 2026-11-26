@@ -6,7 +6,55 @@
  */
 class {
 
-	variables.selfDirectory = getDirectoryFromPath( getCurrentTemplatePath() );
+	variables.selfDirectory   = getDirectoryFromPath( getCurrentTemplatePath() );
+	variables.instanceFactory = "";
+
+	/** @instanceFactory settings.instanceFactory: ( classPath, meta, kind ) => instance. */
+	function withFactory( required any instanceFactory ){
+		variables.instanceFactory = arguments.instanceFactory;
+		return this;
+	}
+
+	/**
+	 * An instance for the module's own use, from the app's factory when it gave one.
+	 *
+	 * @kind "service" and "resolver" (built once, kept) or "input" (built per argument).
+	 */
+	any function build( required string classPath, required string kind ){
+		if( isSimpleValue( variables.instanceFactory ) ){
+			return instantiate( arguments.classPath );
+		}
+		var instance = variables.instanceFactory( arguments.classPath, metadataOf( arguments.classPath ), arguments.kind );
+		if( isNull( instance ) || !isObject( instance ) ){
+			throw( type = "BxGraphQL.ConfigurationException", message = "instanceFactory returned no instance for the #arguments.kind# #arguments.classPath#." );
+		}
+		return instance;
+	}
+
+	/** A class's properties, its parents' first; a child's redeclaration replaces the parent's in place. */
+	array function propertiesOf( required struct meta ){
+		return inheritedMembers( arguments.meta, "properties" );
+	}
+
+	/** A class's functions, its parents' first; an override replaces the parent's in place. Each says where it was `declaredIn`. */
+	array function functionsOf( required struct meta ){
+		return inheritedMembers( arguments.meta, "functions" );
+	}
+
+	private array function inheritedMembers( required struct meta, required string kind ){
+		var members = structIsEmpty( arguments.meta.extends ?: {} ) ? [] : inheritedMembers( arguments.meta.extends, arguments.kind );
+		for( var declared in arguments.meta[ arguments.kind ] ?: [] ){
+			var member     = duplicate( declared ).append( { "declaredIn" : arguments.meta.name } );
+			var memberName = member.name;
+			var at         = members.find( ( candidate ) => candidate.name == memberName );
+			if( at ){
+				members[ at ] = member;
+			} else {
+				arrayAppend( members, member );
+			}
+		}
+		return members;
+	}
 
 	/** Absolute paths, without the extension, of every .bx class under the given files and directories (recursively). */
 	array function under( required array configuredPaths, required string settingName ){

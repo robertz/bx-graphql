@@ -1,4 +1,5 @@
 @graphqlType( "Tag" )
+@graphqlInput
 class accessors="true" {
 
 	property name="label" type="string";

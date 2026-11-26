@@ -1,0 +1,3 @@
+@graphqlEnum( "RED,GREEN" )
+class {
+}

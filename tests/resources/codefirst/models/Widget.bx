@@ -21,4 +21,40 @@ class accessors="true" extends="Timestamped" {
 	@graphqlIgnore
 	property name="passwordHash" type="string";
 
+	@graphqlField( "Status" )
+	property name="status" type="string";
+	property name="soldAt" type="date";
+	property name="makerId" type="numeric";
+
+	@graphqlInputField( "[TagInput!]" )
+	@graphqlWriteOnly
+	property name="labels" type="array";
+
+	property name="related" type="Tag[]";
+
+	/** Use name. */
+	@graphqlDeprecated( "Use name" )
+	property name="title" type="string";
+
+	/**
+	 * The name, as a URL would have it.
+	 *
+	 * @separator What goes between the words.
+	 */
+	@graphqlField
+	string function slug( string separator = "-" ){
+		return lcase( replace( variables.name, " ", arguments.separator, "all" ) );
+	}
+
+	@graphqlField( "Maker" )
+	function madeBy( any env ){
+		return isNull( variables.makerId ) ? javaCast( "null", "" ) : arguments.env.getDataLoader( "makers" ).load( variables.makerId );
+	}
+
+	@graphqlField
+	@graphqlRequires( "admin" )
+	numeric function cost(){
+		return 4.25;
+	}
+
 }

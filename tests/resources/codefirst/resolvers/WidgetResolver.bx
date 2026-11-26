@@ -1,6 +1,6 @@
 class {
 
-	string function slug( required any source ){
+	string function shelfCode( required any source ){
 		return lcase( replace( arguments.source.getName(), " ", "-", "all" ) );
 	}
 

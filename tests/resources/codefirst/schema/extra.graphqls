@@ -3,5 +3,5 @@ type Query {
 }
 
 extend type Widget {
-	slug: String
+	shelfCode: String
 }

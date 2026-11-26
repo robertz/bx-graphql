@@ -1,0 +1,283 @@
+/**
+ * The rest of the code-first schema, over the same fixtures as CodeFirstSpec: enums,
+ * bean functions as fields, inherited service functions, defaults and deprecation,
+ * lists and nulls in inputs, authorization, structured errors, batch loaders and
+ * instanceFactory's kinds. See GraphQLServiceSpec for why paths go through expandPath().
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		variables.root        = expandPath( "tests/resources/codefirst" );
+		variables.loaderCalls = [];
+		variables.seenErrors  = [];
+		var loaderCalls = variables.loaderCalls;
+		var seenErrors  = variables.seenErrors;
+		variables.settings = {
+			"modelPaths"       : [ variables.root & "/models" ],
+			"servicePaths"     : [ variables.root & "/services" ],
+			"structuredErrors" : true,
+			"authorizer"       : ( requirement, context, info ) => isStruct( context ) && ( context.roles ?: [] ).contains( requirement ),
+			"onError"          : ( detail ) => arrayAppend( seenErrors, detail ),
+			"loaders"          : {
+				"makers" : ( keys, context ) => {
+					arrayAppend( loaderCalls, arrayToList( keys ) );
+					var found = {};
+					for( var key in keys ){
+						if( key != 99 ){
+							found[ key ] = { "name" : "Maker #key#" };
+						}
+					}
+					return found;
+				}
+			}
+		};
+		variables.graphQLService = new "../../models/GraphQLService"( variables.settings );
+	}
+
+	function run(){
+		describe( "Enums", function(){
+
+			it( "declares the enum and accepts its values out and in", function(){
+				var result = variables.graphQLService.execute( "{ widget( id: 1 ) { status } widgetsByStatus( status: PAUSED ) }" );
+				var values = variables.graphQLService.execute( '{ __type( name: "Status" ) { enumValues { name } } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.status ).toBe( "ACTIVE" );
+				expect( result.data.widgetsByStatus ).toBe( "PAUSED by name" );
+				expect( values.data.__type.enumValues.map( ( value ) => value.name ) ).toBe( [ "ACTIVE", "PAUSED", "RETIRED" ] );
+			} );
+
+			it( "rejects a value the enum doesn't have", function(){
+				var result = variables.graphQLService.execute( "{ widgetsByStatus( status: MELTED ) }" );
+
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ].extensions.classification ).toBe( "ValidationError" );
+			} );
+
+			it( "says how to refer to an enum when a property is typed as its class", function(){
+				expect( function(){
+					new "../../models/GraphQLService"( { "modelPaths" : [ variables.root & "/bad/enumtyped" ] } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Paint\.colour is typed as the enum Colour" );
+			} );
+
+		} );
+
+		describe( "Bean functions as fields", function(){
+
+			it( "calls the function on the bean, with arguments and their defaults", function(){
+				var result = variables.graphQLService.execute( '{ widget( id: 1 ) { slug under: slug( separator: "_" ) } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.slug ).toBe( "widget-1" );
+				expect( result.data.widget.under ).toBe( "widget_1" );
+			} );
+
+			it( "keeps them out of the input", function(){
+				var result = variables.graphQLService.execute( '{ __type( name: "WidgetInput" ) { inputFields { name } } }' );
+				var names  = result.data.__type.inputFields.map( ( field ) => field.name );
+
+				expect( names ).notToInclude( "slug" );
+				expect( names ).notToInclude( "cost" );
+				expect( names ).toInclude( "labels" );
+			} );
+
+			it( "keeps a write-only property out of the type", function(){
+				var result = variables.graphQLService.execute( '{ __type( name: "Widget" ) { fields { name } } }' );
+
+				expect( result.data.__type.fields.map( ( field ) => field.name ) ).notToInclude( "labels" );
+			} );
+
+		} );
+
+		describe( "Service functions", function(){
+
+			it( "exposes an annotated function inherited from a parent class", function(){
+				var result = variables.graphQLService.execute( "{ ping }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.ping ).toBe( "pong" );
+			} );
+
+			it( "declares an inherited function once when parent and child are both scanned", function(){
+				var service = new "../../models/GraphQLService"( { "servicePaths" : [ variables.root & "/inherit" ] } );
+				var result  = service.execute( "{ ping extra }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.extra ).toBe( "extra" );
+				expect( result.data.ping ).toInclude( "pong from" );
+			} );
+
+			it( "writes plain defaults, argument descriptions and deprecation into the schema", function(){
+				var sdl = variables.graphQLService.getGeneratedSDL();
+
+				expect( sdl ).toInclude( 'order: String = "name"' );
+				expect( sdl ).toInclude( "reverse: Boolean = false" );
+				expect( sdl ).toInclude( "status: Status = ACTIVE" );
+				expect( sdl ).toInclude( '"""Which state."""' );
+				expect( sdl ).toInclude( '): String @deprecated( reason: "Use widgets." )' );
+				expect( sdl ).toInclude( 'title: String @deprecated( reason: "Use name" )' );
+			} );
+
+			it( "applies those defaults when the query leaves the arguments out", function(){
+				var result = variables.graphQLService.execute( "{ widgetsByStatus }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widgetsByStatus ).toBe( "ACTIVE by name" );
+			} );
+
+			it( "gives a date parameter a date", function(){
+				var result = variables.graphQLService.execute( '{ soldSince( since: "2026-01-31T10:30:00+01:00" ) }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.soldSince ).toBe( "2026-01-31T09:30:00Z" );
+			} );
+
+		} );
+
+		describe( "Input beans", function(){
+
+			it( "turns lists into beans, dates into dates, and tells null from left out", function(){
+				var result = variables.graphQLService.execute(
+					query          = "mutation( $w: WidgetInput! ){ describeInput( input: $w ) }",
+					queryVariables = { "w" : {
+						"name"    : "N",
+						"labels"  : [ { "label" : "a" } ],
+						"related" : [ { "label" : "b" } ],
+						"soldAt"  : "2026-01-31T09:30:00Z",
+						"status"  : "PAUSED",
+						"price"   : javaCast( "null", "" )
+					} }
+				);
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.describeInput ).toBe( [
+					"labels: Tag:a",
+					"related: Tag:b",
+					"soldAt: 2026-01-31T09:30:00Z",
+					"status: PAUSED",
+					"price: null",
+					"price given: true",
+					"stock given: false"
+				] );
+			} );
+
+		} );
+
+		describe( "Authorization", function(){
+
+			it( "refuses a guarded field, and only that field", function(){
+				var result = variables.graphQLService.execute( "{ secrets ping }" );
+
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ].message ).toBe( "Not authorized: Query.secrets" );
+				expect( result.errors[ 1 ].extensions.type ).toBe( "BxGraphQL.NotAuthorized" );
+				expect( isNull( result.data.secrets ) ).toBeTrue();
+				expect( result.data.ping ).toBe( "pong" );
+			} );
+
+			it( "takes the requirement from the class, the function's own instead, and a bean function's", function(){
+				var result = variables.graphQLService.execute(
+					query   = "{ secrets profile widget( id: 1 ) { cost } }",
+					context = { "roles" : [ "admin" ] }
+				);
+
+				expect( result.data.secrets ).toBe( "the secrets" );
+				expect( result.data.widget.cost ).toBe( 4.25 );
+				expect( isNull( result.data.profile ) ).toBeTrue();
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ].path ).toBe( [ "profile" ] );
+			} );
+
+			it( "fails at construction when something is guarded and there's no authorizer", function(){
+				var settings = duplicate( variables.settings );
+				structDelete( settings, "authorizer" );
+
+				expect( function(){
+					new "../../models/GraphQLService"( settings );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "graphqlRequires.*authorizer" );
+			} );
+
+		} );
+
+		describe( "Errors", function(){
+
+			it( "gives the exception's own message, its type and the path when structuredErrors is on", function(){
+				var result = variables.graphQLService.execute( query = "mutation { fail }", context = { "roles" : [ "admin" ] } );
+
+				expect( result.errors[ 1 ].message ).toBe( "None left" );
+				expect( result.errors[ 1 ].path ).toBe( [ "fail" ] );
+				expect( result.errors[ 1 ].extensions.type ).toBe( "Shop.OutOfStock" );
+				expect( result.errors[ 1 ].locations[ 1 ].line ).toBe( 1 );
+			} );
+
+			it( "hands each error, with its exception, to onError", function(){
+				arrayClear( variables.seenErrors );
+				variables.graphQLService.execute( query = "mutation { fail }", context = { "roles" : [ "admin" ] } );
+
+				expect( arrayLen( variables.seenErrors ) ).toBe( 1 );
+				expect( variables.seenErrors[ 1 ].type ).toBe( "Shop.OutOfStock" );
+				expect( variables.seenErrors[ 1 ].exception.getMessage() ).toBe( "None left" );
+			} );
+
+			it( "keeps errors as message strings without structuredErrors", function(){
+				var settings = duplicate( variables.settings );
+				structDelete( settings, "structuredErrors" );
+				var result = new "../../models/GraphQLService"( settings ).execute( query = "mutation { fail }", context = { "roles" : [ "admin" ] } );
+
+				expect( result.errors[ 1 ] ).toBe( "Exception while fetching data (/fail) : None left" );
+			} );
+
+		} );
+
+		describe( "Batch loaders", function(){
+
+			it( "asks the loader once for every key a level of the query needs, each key once", function(){
+				arrayClear( variables.loaderCalls );
+				var result = variables.graphQLService.execute( "{ fromMakers( makerIds: [ 3, 4, 3, 99 ] ) { madeBy { name } } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( variables.loaderCalls ).toBe( [ "3,4,99" ] );
+				expect( result.data.fromMakers[ 1 ].madeBy.name ).toBe( "Maker 3" );
+				expect( result.data.fromMakers[ 3 ].madeBy.name ).toBe( "Maker 3" );
+				expect( isNull( result.data.fromMakers[ 4 ].madeBy ) ).toBeTrue();
+			} );
+
+			it( "doesn't carry loaded values over to the next request", function(){
+				arrayClear( variables.loaderCalls );
+				variables.graphQLService.execute( "{ fromMakers( makerIds: [ 3 ] ) { madeBy { name } } }" );
+				variables.graphQLService.execute( "{ fromMakers( makerIds: [ 3 ] ) { madeBy { name } } }" );
+
+				expect( variables.loaderCalls ).toBe( [ "3", "3" ] );
+			} );
+
+		} );
+
+		describe( "instanceFactory", function(){
+
+			it( "is asked for services, resolvers and input beans, by kind", function(){
+				var kinds    = {};
+				var settings = duplicate( variables.settings );
+				settings.schemaPaths         = [ variables.root & "/schema" ];
+				settings.resolverBasePackage = variables.root & "/resolvers";
+				settings.instanceFactory     = ( classPath, meta, kind ) => {
+					kinds[ kind ] = ( kinds[ kind ] ?: [] ).append( meta.simpleName );
+					return new "../../models/ClassFiles"().instantiate( classPath );
+				};
+
+				var result = new "../../models/GraphQLService"( settings ).execute(
+					query          = "mutation( $w: WidgetInput! ){ saveWidget( input: $w ) } ",
+					queryVariables = { "w" : { "name" : "Nut", "maker" : { "name" : "Bolt Co" } } }
+				);
+				var again = new "../../models/GraphQLService"( settings ).execute( "{ version widget( id: 2 ) { shelfCode } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( again.errors ).toBeEmpty();
+				expect( kinds.service ).toInclude( "WidgetService" );
+				expect( kinds.input ).toBe( [ "Widget", "Maker" ] );
+				expect( kinds.resolver.sort( "text" ) ).toBe( [ "QueryResolver", "WidgetResolver" ] );
+			} );
+
+		} );
+	}
+
+}

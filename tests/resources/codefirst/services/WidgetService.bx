@@ -1,4 +1,4 @@
-class {
+class extends="../support/BaseService" {
 
 	/** One widget by id. */
 	@graphqlQuery
@@ -9,6 +9,7 @@ class {
 			price        = 9.5,
 			stock        = 3,
 			active       = true,
+			status       = "ACTIVE",
 			maker        = new "../models/Maker"( name = "Acme" ),
 			tags         = [ new "../models/Tag"( label = "new" ) ],
 			passwordHash = "hunter2",
@@ -48,6 +49,43 @@ class {
 		var found = widget( arguments.id );
 		found.setName( arguments.name );
 		return found;
+	}
+
+	/**
+	 * Widgets in one state.
+	 *
+	 * @status Which state.
+	 * @deprecated Use widgets.
+	 */
+	@graphqlQuery
+	string function widgetsByStatus( string status = "ACTIVE" graphqlType="Status", string order = "name", boolean reverse = false ){
+		return arguments.status & " by " & arguments.order;
+	}
+
+	@graphqlQuery
+	string function soldSince( required date since ){
+		return arguments.since.toInstant().toString();
+	}
+
+	@graphqlQuery
+	@graphqlReturns( "[Widget!]!" )
+	array function fromMakers( required array makerIds graphqlType="[Int!]!" ){
+		return arguments.makerIds.map( ( makerId ) => new "../models/Widget"( id = makerId, name = "From #makerId#", makerId = makerId ) );
+	}
+
+	@graphqlMutation
+	@graphqlReturns( "[String!]!" )
+	array function describeInput( required Widget input, struct args ){
+		var input = arguments.input;
+		return [
+			"labels: " & ( input.getLabels() ?: [] ).map( ( label ) => getMetadata( label ).name.listLast( "." ) & ":" & label.getLabel() ).toList(),
+			"related: " & ( input.getRelated() ?: [] ).map( ( tag ) => getMetadata( tag ).name.listLast( "." ) & ":" & tag.getLabel() ).toList(),
+			"soldAt: " & ( isNull( input.getSoldAt() ) ? "none" : input.getSoldAt().toInstant().toString() ),
+			"status: " & ( input.getStatus() ?: "none" ),
+			"price: " & ( isNull( input.getPrice() ) ? "null" : input.getPrice() ),
+			"price given: " & arrayContainsNoCase( structKeyArray( arguments.args.input ), "price" ),
+			"stock given: " & arrayContainsNoCase( structKeyArray( arguments.args.input ), "stock" )
+		];
 	}
 
 	string function notExposed(){

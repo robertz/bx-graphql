@@ -1,0 +1,40 @@
+/**
+ * One settings.loaders entry, ( keys, context ) => values, wrapped as an
+ * org.dataloader.BatchLoader via createDynamicProxy. The function answers for every
+ * key at once: an array with a value per key in the keys' order, or a struct by key
+ * (a key it has nothing for becomes null).
+ */
+class {
+
+	variables.loaderName = "";
+	variables.loader     = "";
+	variables.context    = "";
+
+	function init( required string loaderName, required any loader, any context ){
+		variables.loaderName = arguments.loaderName;
+		variables.loader     = arguments.loader;
+		variables.context    = arguments.context ?: "";
+		return this;
+	}
+
+	any function load( required any keys ){
+		var keyList = arrayMap( arguments.keys, ( key ) => key );
+		var loaded  = variables.loader( keyList, variables.context );
+		var values  = createObject( "java", "java.util.ArrayList" ).init();
+
+		if( !isNull( loaded ) && isStruct( loaded ) ){
+			for( var key in keyList ){
+				values.add( loaded[ toString( key ) ] ?: javaCast( "null", "" ) );
+			}
+		} else if( !isNull( loaded ) && isArray( loaded ) && arrayLen( loaded ) == arrayLen( keyList ) ){
+			for( var value in loaded ){
+				values.add( value ?: javaCast( "null", "" ) );
+			}
+		} else {
+			throw( message = "The #variables.loaderName# loader must return a struct by key, or an array with one value per key (#arrayLen( keyList )# asked for)." );
+		}
+
+		return createObject( "java", "java.util.concurrent.CompletableFuture" ).completedFuture( values );
+	}
+
+}

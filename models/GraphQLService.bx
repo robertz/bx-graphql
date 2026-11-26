@@ -19,6 +19,9 @@ class {
 		variables.settings  = arguments.settings;
 		variables.javaClass  = new "JavaClassFactory"();
 		variables.classFiles = new "ClassFiles"();
+		if( structKeyExists( arguments.settings, "instanceFactory" ) && isFunctionValue( arguments.settings.instanceFactory ) ){
+			variables.classFiles.withFactory( arguments.settings.instanceFactory );
+		}
 		buildSchema();
 		return this;
 	}
@@ -42,8 +45,13 @@ class {
 	}
 
 	/**
-	 * Executes a query/mutation and returns a plain CFML struct — {data, errors} — so
+	 * Executes a query/mutation and returns a plain BoxLang struct — {data, errors} — so
 	 * callers never need to touch graphql-java classes directly.
+	 *
+	 * errors holds graphql-java's message strings, or with settings.structuredErrors,
+	 * structs as the GraphQL spec has them: { message, path?, locations?, extensions? }.
+	 * settings.onError, if given, is called once per error with
+	 * { message, path, locations, type, classification, exception }.
 	 */
 	struct function execute( required string query, struct queryVariables = {}, any context = "" ){
 		var executionInputBuilder = variables.javaClass.create( "graphql.ExecutionInput" )
@@ -54,13 +62,104 @@ class {
 		if( !structIsEmpty( arguments.queryVariables ) ){
 			executionInputBuilder = executionInputBuilder.variables( toJavaMap( arguments.queryVariables ) )
 		}
+		if( !structIsEmpty( variables.settings.loaders ?: {} ) ){
+			executionInputBuilder = executionInputBuilder.dataLoaderRegistry( loaderRegistryFor( arguments.context ) )
+		}
 
-		var result = variables.engine.execute( executionInputBuilder.build() )
+		var result  = variables.engine.execute( executionInputBuilder.build() )
+		var details = arrayMap( result.getErrors() ?: [], ( e ) => describeError( e ) )
 
+		if( structKeyExists( variables.settings, "onError" ) ){
+			for( var detail in details ){
+				variables.settings.onError( detail );
+			}
+		}
+
+		var structured = isBoolean( variables.settings.structuredErrors ?: "" ) && variables.settings.structuredErrors;
 		return {
 			"data"   : result.getData(),
-			"errors" : arrayMap( result.getErrors() ?: [], ( e ) => e.getMessage() )
+			"errors" : details.map( ( detail ) => structured ? specErrorOf( detail ) : detail.rawMessage )
 		};
+	}
+
+	/**
+	 * What's known about one graphql-java error. For an exception thrown by a resolver
+	 * or service method, message is the exception's own (graphql-java's reads
+	 * "Exception while fetching data (/path) : message") and type is its BoxLang type.
+	 */
+	private struct function describeError( required any error ){
+		var detail = {
+			"rawMessage"     : arguments.error.getMessage(),
+			"message"        : arguments.error.getMessage(),
+			"path"           : [],
+			"locations"      : [],
+			"type"           : "",
+			"classification" : "",
+			"exception"      : javaCast( "null", "" )
+		};
+
+		try {
+			detail.classification = toString( arguments.error.getErrorType() );
+		} catch( any ignored ){}
+		try {
+			detail.path = arrayMap( arguments.error.getPath() ?: [], ( segment ) => isNumeric( segment ) ? int( segment ) : toString( segment ) );
+		} catch( any ignored ){}
+		try {
+			detail.locations = arrayMap( arguments.error.getLocations() ?: [], ( location ) => {
+				return { "line" : location.getLine(), "column" : location.getColumn() };
+			} );
+		} catch( any ignored ){}
+
+		if( isInstanceOf( arguments.error, "graphql.ExceptionWhileDataFetching" ) ){
+			var thrown = arguments.error.getException();
+			detail.exception = thrown;
+			detail.message   = thrown.getMessage() ?: detail.rawMessage;
+			try {
+				detail.type = thrown.type;
+			} catch( any ignored ){
+				detail.type = thrown.getClass().getName();
+			}
+		}
+		return detail;
+	}
+
+	private struct function specErrorOf( required struct detail ){
+		var specError = { "message" : arguments.detail.message };
+		if( arrayLen( arguments.detail.path ) ){
+			specError[ "path" ] = arguments.detail.path;
+		}
+		if( arrayLen( arguments.detail.locations ) ){
+			specError[ "locations" ] = arguments.detail.locations;
+		}
+		var extensions = {};
+		if( len( arguments.detail.type ) ){
+			extensions[ "type" ] = arguments.detail.type;
+		}
+		if( len( arguments.detail.classification ) ){
+			extensions[ "classification" ] = arguments.detail.classification;
+		}
+		if( !structIsEmpty( extensions ) ){
+			specError[ "extensions" ] = extensions;
+		}
+		return specError;
+	}
+
+	/**
+	 * A DataLoader per settings.loaders entry, new for each execution so nothing is
+	 * cached across requests. A resolver asks for one value with
+	 * env.getDataLoader( "name" ).load( key ) and returns that; graphql-java collects
+	 * the keys asked for across a level of the query and calls the loader once.
+	 */
+	private any function loaderRegistryFor( any context ){
+		var registryBuilder = variables.javaClass.create( "org.dataloader.DataLoaderRegistry" ).newRegistry();
+		for( var loaderName in variables.settings.loaders ){
+			var batchLoader = new "BatchLoaderAdapter"( loaderName, variables.settings.loaders[ loaderName ], arguments.context ?: "" );
+			registryBuilder = registryBuilder.register(
+				toString( loaderName ),
+				variables.javaClass.create( "org.dataloader.DataLoaderFactory" ).newDataLoader( createDynamicProxy( batchLoader, "org.dataloader.BatchLoader" ) )
+			);
+		}
+		return registryBuilder.build();
 	}
 
 	/**
@@ -189,7 +288,15 @@ class {
 			);
 		}
 		if( structKeyExists( variables.settings, "instanceFactory" ) && !isFunctionValue( variables.settings.instanceFactory ) ){
-			throw( type = "BxGraphQL.ConfigurationException", message = "instanceFactory must be a function: ( classPath, meta ) => instance." );
+			throw( type = "BxGraphQL.ConfigurationException", message = "instanceFactory must be a function: ( classPath, meta, kind ) => instance." );
+		}
+		for( var name in [ "authorizer", "onError" ] ){
+			if( structKeyExists( variables.settings, name ) && !isFunctionValue( variables.settings[ name ] ) ){
+				throw( type = "BxGraphQL.ConfigurationException", message = "#name# must be a function." );
+			}
+		}
+		if( structKeyExists( variables.settings, "loaders" ) && ( !isStruct( variables.settings.loaders ) || structSome( variables.settings.loaders, ( name, loader ) => !isFunctionValue( loader ) ) ) ){
+			throw( type = "BxGraphQL.ConfigurationException", message = "loaders must be a struct of { name : ( keys, context ) => values }." );
 		}
 	}
 
@@ -302,6 +409,7 @@ class {
 		var entryIterator       = arguments.typeRegistry.types().entrySet().iterator();
 		var resolverBasePackage = normalizeResolverBasePackage( variables.settings.resolverBasePackage ?: "" );
 		var instances           = {};
+		var hasAuthorizer       = isFunctionValue( variables.settings.authorizer ?: "" );
 
 		while( entryIterator.hasNext() ){
 			var entry = entryIterator.next();
@@ -313,7 +421,8 @@ class {
 			var adapter = new "DataFetcherAdapter"(
 				typeName            = typeName,
 				resolverBasePackage = resolverBasePackage,
-				javaClass           = variables.javaClass
+				javaClass           = variables.javaClass,
+				classFiles          = variables.classFiles
 			);
 			var typeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.TypeRuntimeWiring" )
 				.newTypeWiring( typeName )
@@ -323,32 +432,27 @@ class {
 				if( operation.rootType != typeName ){
 					continue;
 				}
-				if( !structKeyExists( instances, operation.classPath ) ){
-					instances[ operation.classPath ] = serviceInstance( operation.classPath );
+				if( operation.guarded && !hasAuthorizer ){
+					throw(
+						type    = "BxGraphQL.ConfigurationException",
+						message = "#operation.where# is marked @graphqlRequires, which needs settings.authorizer: ( requirement, context, info ) => boolean."
+					);
+				}
+				if( len( operation.classPath ) && !structKeyExists( instances, operation.classPath ) ){
+					instances[ operation.classPath ] = variables.classFiles.build( operation.classPath, "service" );
 				}
 				var fetcher = new "MethodDataFetcher"(
-					instance   = instances[ operation.classPath ],
-					methodName = operation.methodName,
-					parameters = operation.parameters,
+					instance   = len( operation.classPath ) ? instances[ operation.classPath ] : "",
+					operation  = operation,
 					models     = arguments.generated.models,
-					classFiles = variables.classFiles
+					classFiles = variables.classFiles,
+					authorizer = hasAuthorizer ? variables.settings.authorizer : ""
 				);
 				typeWiringBuilder = typeWiringBuilder.dataFetcher( operation.fieldName, createDynamicProxy( fetcher, "graphql.schema.DataFetcher" ) );
 			}
 
 			arguments.runtimeWiringBuilder.type( typeWiringBuilder.build() );
 		}
-	}
-
-	private any function serviceInstance( required string classPath ){
-		if( !structKeyExists( variables.settings, "instanceFactory" ) ){
-			return variables.classFiles.instantiate( arguments.classPath );
-		}
-		var instance = variables.settings.instanceFactory( arguments.classPath, variables.classFiles.metadataOf( arguments.classPath ) );
-		if( isNull( instance ) || !isObject( instance ) ){
-			throw( type = "BxGraphQL.ConfigurationException", message = "instanceFactory returned no instance for #arguments.classPath#." );
-		}
-		return instance;
 	}
 
 }

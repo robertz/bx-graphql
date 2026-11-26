@@ -1,0 +1,4 @@
+/** Where a widget is in its life. */
+@graphqlEnum( "ACTIVE, PAUSED, RETIRED" )
+class {
+}

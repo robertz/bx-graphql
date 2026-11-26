@@ -8,7 +8,18 @@ input MakerDetails {
 	name: String!
 }
 
+"""Where a widget is in its life."""
+enum Status {
+	ACTIVE
+	PAUSED
+	RETIRED
+}
+
 type Tag {
+	label: String
+}
+
+input TagInput {
 	label: String
 }
 
@@ -24,6 +35,19 @@ type Widget {
 	active: Boolean
 	maker: Maker
 	tags: [Tag!]
+	status: Status
+	soldAt: DateTime
+	makerId: Float
+	related: [Tag!]
+	"""Use name."""
+	title: String @deprecated( reason: "Use name" )
+	"""The name, as a URL would have it."""
+	slug(
+		"""What goes between the words."""
+		separator: String = "-"
+	): String
+	madeBy: Maker
+	cost: Float
 }
 
 """A thing we sell."""
@@ -36,17 +60,38 @@ input WidgetInput {
 	active: Boolean
 	maker: MakerDetails
 	tags: [String!]
+	status: Status
+	soldAt: DateTime
+	makerId: Float
+	labels: [TagInput!]
+	related: [TagInput!]
+	"""Use name."""
+	title: String
 }
 
 type Query {
+	secrets: String
+	profile: String
 	greet( name: String! ): String
+	ping: String
 	"""One widget by id."""
 	widget( id: ID! ): Widget
-	widgets( limit: Float ): [Widget!]!
+	widgets( limit: Float = 2 ): [Widget!]!
 	whoAmI: String
+	"""Widgets in one state."""
+	widgetsByStatus(
+		"""Which state."""
+		status: Status = ACTIVE
+		order: String = "name"
+		reverse: Boolean = false
+	): String @deprecated( reason: "Use widgets." )
+	soldSince( since: DateTime! ): String
+	fromMakers( makerIds: [Int!]! ): [Widget!]!
 }
 
 type Mutation {
+	fail: String
 	saveWidget( input: WidgetInput! ): String!
 	renameWidget( id: ID!, name: String! ): Widget
+	describeInput( input: WidgetInput! ): [String!]!
 }

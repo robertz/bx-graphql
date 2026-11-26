@@ -2,8 +2,10 @@
  * Code-first schema: turns annotated classes into SDL, which GraphQLService merges
  * with any hand-written .graphqls files.
  *
- *   modelPaths   — classes marked @graphqlType and/or @graphqlInput become a type and/or
- *                  an input, a field per property.
+ *   modelPaths   — a class marked @graphqlType and/or @graphqlInput becomes a type and/or
+ *                  an input, a field per property, plus a field per function marked
+ *                  @graphqlField (on the type only). One marked @graphqlEnum( "A,B" )
+ *                  becomes an enum.
  *   servicePaths — public functions marked @graphqlQuery or @graphqlMutation become
  *                  fields of Query or Mutation.
  *
@@ -13,7 +15,9 @@
 class {
 
 	static {
-		INJECTED_PARAMETERS = [ "context", "env" ];
+		// parameters of these names are filled in by MethodDataFetcher, not by the query
+		INJECTED_PARAMETERS = [ "context", "env", "args" ];
+		NAME_PATTERN        = "^[_A-Za-z][_0-9A-Za-z]*$";
 	}
 
 	variables.classFiles = "";
@@ -26,22 +30,28 @@ class {
 	/**
 	 * @existingTypeNames Types and scalars the hand-written schema already declares.
 	 *
-	 * @return { sdl, models : { SimpleName : { classPath, typeName, inputName, meta } },
-	 *           operations : [ { rootType, fieldName, classPath, methodName, parameters, meta } ] }
+	 * @return { sdl,
+	 *           models : { SimpleName : { classPath, meta, typeName, inputName, enumName, enumValues } },
+	 *           operations : [ { rootType, fieldName, classPath ("" = called on the field's source),
+	 *                            methodName, parameters, meta, where, guarded, requirement } ] }
 	 */
 	struct function generate( required array modelPaths, required array servicePaths, required array existingTypeNames ){
 		var models     = modelsIn( arguments.modelPaths );
 		var mapper     = new "TypeMapper"( models );
 		var operations = operationsIn( arguments.servicePaths );
 		var blocks     = [];
+		var typeTexts  = [];
 
 		for( var simpleName in structKeyArray( models ).sort( "textnocase" ) ){
 			var model = models[ simpleName ];
+			if( len( model.enumName ) ){
+				arrayAppend( blocks, description( model.meta.documentation.hint ?: "", "" ) & "enum #model.enumName# {" & char( 10 ) & char( 9 ) & arrayToList( model.enumValues, char( 10 ) & char( 9 ) ) & char( 10 ) & "}" );
+			}
 			if( len( model.typeName ) ){
-				arrayAppend( blocks, beanBlock( "type", model.typeName, model, mapper, false ) );
+				arrayAppend( blocks, beanBlock( "type", model.typeName, model, mapper, false, operations, typeTexts ) );
 			}
 			if( len( model.inputName ) ){
-				arrayAppend( blocks, beanBlock( "input", model.inputName, model, mapper, true ) );
+				arrayAppend( blocks, beanBlock( "input", model.inputName, model, mapper, true, operations, typeTexts ) );
 			}
 		}
 
@@ -51,14 +61,17 @@ class {
 				var keyword = arrayContains( arguments.existingTypeNames, rootType ) ? "extend type" : "type";
 				arrayAppend(
 					blocks,
-					"#keyword# #rootType# {" & char( 10 ) & fields.map( ( operation ) => operationField( operation, mapper ) ).toList( char( 10 ) ) & char( 10 ) & "}"
+					"#keyword# #rootType# {" & char( 10 )
+						& fields.map( ( operation ) => fieldLine( operation.meta, operation.fieldName, operation.where, mapper, operation.meta.annotations.graphqlReturns ?: "", typeTexts, models ) ).toList( char( 10 ) )
+						& char( 10 ) & "}"
 				);
 			}
 		}
 
 		var sdl = arrayToList( blocks, char( 10 ) & char( 10 ) );
 		for( var scalarName in [ "DateTime", "Long" ] ){
-			if( reFind( "[:\[] ?#scalarName#\b", sdl ) && !arrayContains( arguments.existingTypeNames, scalarName ) ){
+			var used = typeTexts.some( ( typeText ) => reFind( "\b#scalarName#\b", typeText ) > 0 );
+			if( used && !arrayContains( arguments.existingTypeNames, scalarName ) ){
 				sdl = "scalar #scalarName#" & char( 10 ) & char( 10 ) & sdl;
 			}
 		}
@@ -71,31 +84,49 @@ class {
 		for( var classPath in variables.classFiles.under( arguments.modelPaths, "modelPaths" ) ){
 			var meta        = variables.classFiles.metadataOf( classPath );
 			var annotations = meta.annotations;
-			if( !structKeyExists( annotations, "graphqlType" ) && !structKeyExists( annotations, "graphqlInput" ) ){
+			var isEnum      = structKeyExists( annotations, "graphqlEnum" );
+			if( !structKeyExists( annotations, "graphqlType" ) && !structKeyExists( annotations, "graphqlInput" ) && !isEnum ){
 				continue;
 			}
 			if( structKeyExists( models, meta.simpleName ) ){
 				throw(
 					type    = "BxGraphQL.ConfigurationException",
-					message = "Two annotated classes are named #meta.simpleName#: #models[ meta.simpleName ].classPath# and #classPath#."
+					message = "Two annotated classes are named #meta.simpleName#: #models[ meta.simpleName ].classPath# and #classPath#. Types are found by a class's simple name, so one has to be renamed."
 				);
 			}
+			if( isEnum && ( structKeyExists( annotations, "graphqlType" ) || structKeyExists( annotations, "graphqlInput" ) ) ){
+				throw( type = "BxGraphQL.ConfigurationException", message = "#meta.name# is marked @graphqlEnum, so it can't also be a type or an input." );
+			}
 			models[ meta.simpleName ] = {
-				"classPath" : classPath,
-				"meta"      : meta,
-				"typeName"  : structKeyExists( annotations, "graphqlType" ) ? ( len( annotations.graphqlType ) ? annotations.graphqlType : meta.simpleName ) : "",
-				"inputName" : structKeyExists( annotations, "graphqlInput" ) ? ( len( annotations.graphqlInput ) ? annotations.graphqlInput : meta.simpleName & "Input" ) : ""
+				"classPath"  : classPath,
+				"meta"       : meta,
+				"typeName"   : structKeyExists( annotations, "graphqlType" ) ? ( len( annotations.graphqlType ) ? annotations.graphqlType : meta.simpleName ) : "",
+				"inputName"  : structKeyExists( annotations, "graphqlInput" ) ? ( len( annotations.graphqlInput ) ? annotations.graphqlInput : meta.simpleName & "Input" ) : "",
+				"enumName"   : isEnum ? meta.simpleName : "",
+				"enumValues" : isEnum ? enumValuesOf( meta ) : []
 			};
 		}
 		return models;
 	}
 
+	private array function enumValuesOf( required struct meta ){
+		var values = listToArray( arguments.meta.annotations.graphqlEnum, ", " );
+		if( !arrayLen( values ) || values.some( ( value ) => !reFind( static.NAME_PATTERN, value ) ) ){
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "#arguments.meta.name#: @graphqlEnum needs its values as a list of names, such as @graphqlEnum( ""ACTIVE,PAUSED"" )."
+			);
+		}
+		return values;
+	}
+
 	private array function operationsIn( required array servicePaths ){
 		var operations = [];
 		var claimed    = {};
+		var claimedBy  = {};
 		for( var classPath in variables.classFiles.under( arguments.servicePaths, "servicePaths" ) ){
 			var meta = variables.classFiles.metadataOf( classPath );
-			for( var fn in meta.functions ){
+			for( var fn in variables.classFiles.functionsOf( meta ) ){
 				for( var rootType in [ "Query", "Mutation" ] ){
 					if( !structKeyExists( fn.annotations, "graphql" & rootType ) ){
 						continue;
@@ -106,36 +137,61 @@ class {
 					}
 					var fieldName = len( fn.annotations[ "graphql" & rootType ] ) ? fn.annotations[ "graphql" & rootType ] : fn.name;
 					var claimKey  = rootType & "." & fieldName;
+					// a parent service in the same folder and its child both list the parent's function: one field
+					if( structKeyExists( claimed, claimKey ) && claimedBy[ claimKey ] == fn.declaredIn & "." & fn.name ){
+						continue;
+					}
 					if( structKeyExists( claimed, claimKey ) ){
 						throw(
 							type    = "BxGraphQL.ConfigurationException",
 							message = "#rootType#.#fieldName# is declared twice: by #claimed[ claimKey ]# and #where#."
 						);
 					}
-					claimed[ claimKey ] = where;
-					arrayAppend( operations, {
-						"rootType"   : rootType,
-						"fieldName"  : fieldName,
-						"classPath"  : classPath,
-						"methodName" : fn.name,
-						"parameters" : fn.parameters,
-						"meta"       : fn,
-						"where"      : where
-					} );
+					claimed[ claimKey ]   = where;
+					claimedBy[ claimKey ] = fn.declaredIn & "." & fn.name;
+					arrayAppend( operations, operationOf( rootType, fieldName, classPath, fn, meta, where ) );
 				}
 			}
 		}
 		return operations;
 	}
 
-	private string function beanBlock( required string keyword, required string name, required struct model, required any mapper, required boolean forInput ){
+	/** @graphqlRequires on the function, else on its class: the function's wins, even when empty. */
+	private struct function operationOf( required string rootType, required string fieldName, required string classPath, required struct fn, required struct classMeta, required string where ){
+		var onFunction = structKeyExists( arguments.fn.annotations, "graphqlRequires" );
+		var onClass    = structKeyExists( arguments.classMeta.annotations, "graphqlRequires" );
+		return {
+			"rootType"    : arguments.rootType,
+			"fieldName"   : arguments.fieldName,
+			"classPath"   : arguments.classPath,
+			"methodName"  : arguments.fn.name,
+			"parameters"  : arguments.fn.parameters,
+			"meta"        : arguments.fn,
+			"where"       : arguments.where,
+			"guarded"     : onFunction || onClass,
+			"requirement" : onFunction ? arguments.fn.annotations.graphqlRequires : ( onClass ? arguments.classMeta.annotations.graphqlRequires : "" )
+		};
+	}
+
+	private string function beanBlock(
+		required string keyword,
+		required string name,
+		required struct model,
+		required any mapper,
+		required boolean forInput,
+		required array operations,
+		required array typeTexts
+	){
 		var lines = [];
-		for( var property in propertiesOf( arguments.model.meta ) ){
+		var meta  = arguments.model.meta;
+		for( var property in variables.classFiles.propertiesOf( meta ) ){
 			var annotations = property.annotations;
-			if( structKeyExists( annotations, "graphqlIgnore" ) || ( arguments.forInput && structKeyExists( annotations, "graphqlReadOnly" ) ) ){
+			if( structKeyExists( annotations, "graphqlIgnore" )
+				|| ( arguments.forInput && structKeyExists( annotations, "graphqlReadOnly" ) )
+				|| ( !arguments.forInput && structKeyExists( annotations, "graphqlWriteOnly" ) ) ){
 				continue;
 			}
-			var where = "#arguments.model.meta.name#.#property.name#";
+			var where = "#meta.name#.#property.name#";
 			var fieldType = "";
 			if( arguments.forInput && len( annotations.graphqlInputField ?: "" ) ){
 				fieldType = annotations.graphqlInputField;
@@ -149,53 +205,128 @@ class {
 					fieldType &= "!";
 				}
 			}
-			arrayAppend( lines, description( property.documentation.hint ?: "", char( 9 ) ) & char( 9 ) & property.name & ": " & fieldType );
+			arrayAppend( arguments.typeTexts, fieldType );
+			arrayAppend(
+				lines,
+				description( property.documentation.hint ?: "", char( 9 ) ) & char( 9 ) & property.name & ": " & fieldType
+					& ( arguments.forInput ? "" : deprecation( annotations, property.documentation ) )
+			);
 		}
+
+		if( !arguments.forInput ){
+			for( var fn in variables.classFiles.functionsOf( meta ) ){
+				if( !structKeyExists( fn.annotations, "graphqlField" ) ){
+					continue;
+				}
+				var fnWhere = "#meta.name#.#fn.name#()";
+				if( fn.access != "public" ){
+					throw( type = "BxGraphQL.ConfigurationException", message = "#fnWhere# is marked @graphqlField but isn't public." );
+				}
+				arrayAppend( lines, fieldLine( fn, fn.name, fnWhere, arguments.mapper, fn.annotations.graphqlField, arguments.typeTexts, {} ) );
+				arrayAppend( arguments.operations, operationOf( arguments.name, fn.name, "", fn, meta, fnWhere ) );
+			}
+		}
+
 		if( !arrayLen( lines ) ){
 			throw(
 				type    = "BxGraphQL.ConfigurationException",
-				message = "#arguments.model.meta.name# would make #arguments.keyword# #arguments.name# with no fields."
+				message = "#meta.name# would make #arguments.keyword# #arguments.name# with no fields."
 			);
 		}
-		return description( arguments.model.meta.documentation.hint ?: "", "" ) & "#arguments.keyword# #arguments.name# {" & char( 10 ) & arrayToList( lines, char( 10 ) ) & char( 10 ) & "}";
+		return description( meta.documentation.hint ?: "", "" ) & "#arguments.keyword# #arguments.name# {" & char( 10 ) & arrayToList( lines, char( 10 ) ) & char( 10 ) & "}";
 	}
 
-	/** A class's properties, its parents' first; a child's redeclaration replaces the parent's in place. */
-	private array function propertiesOf( required struct meta ){
-		var inherited = structIsEmpty( arguments.meta.extends ?: {} ) ? [] : propertiesOf( arguments.meta.extends );
-		for( var property in arguments.meta.properties ){
-			var at = inherited.find( ( candidate ) => candidate.name == property.name );
-			if( at ){
-				inherited[ at ] = property;
-			} else {
-				arrayAppend( inherited, property );
-			}
-		}
-		return inherited;
-	}
-
-	private string function operationField( required struct operation, required any mapper ){
-		var fn          = arguments.operation.meta;
-		var where       = arguments.operation.where;
-		var mapper      = arguments.mapper;
-		var sdlArguments = fn.parameters
+	/**
+	 * One field made from a function: `name( arguments ): Type`, with its description and
+	 * deprecation. Arguments go one to a line when any of them has a description.
+	 *
+	 * @statedReturn The return type when an annotation gave it verbatim, else "".
+	 */
+	private string function fieldLine(
+		required struct fn,
+		required string fieldName,
+		required string where,
+		required any mapper,
+		required string statedReturn,
+		required array typeTexts,
+		required struct models
+	){
+		var mapper       = arguments.mapper;
+		var where        = arguments.where;
+		var typeTexts    = arguments.typeTexts;
+		var models       = arguments.models;
+		var described    = false;
+		var sdlArguments = arguments.fn.parameters
 			.filter( ( parameter ) => !arrayContainsNoCase( static.INJECTED_PARAMETERS, parameter.name ) )
 			.map( ( parameter ) => {
-				if( len( parameter.annotations.graphqlType ?: "" ) ){
-					return parameter.name & ": " & parameter.annotations.graphqlType;
-				}
-				var argumentType = mapper.nameFor( parameter.type ?: "any", true, "#where#'s parameter #parameter.name#", "graphqlType=""..."" on the parameter" );
-				return parameter.name & ": " & argumentType & ( parameter.required ? "!" : "" );
+				var argumentType = len( parameter.annotations.graphqlType ?: "" )
+					? parameter.annotations.graphqlType
+					: mapper.nameFor( parameter.type ?: "any", true, "#where#'s parameter #parameter.name#", "graphqlType=""..."" on the parameter" ) & ( parameter.required ? "!" : "" );
+				arrayAppend( typeTexts, argumentType );
+				var hint = parameter.documentation.hint ?: "";
+				described = described || len( trim( hint ) ) > 0;
+				return {
+					"description" : hint,
+					"text"        : parameter.name & ": " & argumentType & defaultOf( parameter, argumentType, models )
+				};
 			} );
 
-		var returnType = len( fn.annotations.graphqlReturns ?: "" )
-			? fn.annotations.graphqlReturns
-			: arguments.mapper.nameFor( fn.returnType ?: "any", false, "#where#'s return", "@graphqlReturns( ""..."" )" );
+		var returnType = len( arguments.statedReturn )
+			? arguments.statedReturn
+			: arguments.mapper.nameFor( arguments.fn.returnType ?: "any", false, "#where#'s return", "@graphqlReturns( ""..."" )" );
+		arrayAppend( arguments.typeTexts, returnType );
 
-		return description( fn.documentation.hint ?: "", char( 9 ) )
-			& char( 9 ) & arguments.operation.fieldName
-			& ( arrayLen( sdlArguments ) ? "( " & arrayToList( sdlArguments, ", " ) & " )" : "" )
-			& ": " & returnType;
+		var argumentText = "";
+		if( arrayLen( sdlArguments ) && described ){
+			argumentText = "(" & char( 10 )
+				& sdlArguments.map( ( argument ) => description( argument.description, char( 9 ) & char( 9 ) ) & char( 9 ) & char( 9 ) & argument.text ).toList( char( 10 ) )
+				& char( 10 ) & char( 9 ) & ")";
+		} else if( arrayLen( sdlArguments ) ){
+			argumentText = "( " & sdlArguments.map( ( argument ) => argument.text ).toList( ", " ) & " )";
+		}
+
+		return description( arguments.fn.documentation.hint ?: "", char( 9 ) )
+			& char( 9 ) & arguments.fieldName & argumentText & ": " & returnType
+			& deprecation( arguments.fn.annotations, arguments.fn.documentation );
+	}
+
+	/**
+	 * ` = value` for an optional parameter whose default is a plain literal that suits its
+	 * GraphQL type; "" otherwise, and then the function's own default applies when the
+	 * argument is left out, as it does either way.
+	 */
+	private string function defaultOf( required struct parameter, required string argumentType, required struct models ){
+		if( arguments.parameter.required || isNull( arguments.parameter.default ) || !isSimpleValue( arguments.parameter.default ) || find( "[", arguments.argumentType ) ){
+			return "";
+		}
+		var value    = arguments.parameter.default;
+		var baseType = reReplace( arguments.argumentType, "[!\s]", "", "all" );
+		switch( baseType ){
+			case "String": case "ID":
+				return " = " & JSONSerialize( toString( value ) );
+			case "Boolean":
+				return isBoolean( value ) && !isNumeric( value ) ? " = " & ( value ? "true" : "false" ) : "";
+			case "Int":
+				return isNumeric( value ) && int( value ) == value ? " = " & int( value ) : "";
+			case "Float":
+				return isNumeric( value ) ? " = " & value : "";
+		}
+		for( var simpleName in arguments.models ){
+			var model = arguments.models[ simpleName ];
+			if( model.enumName == baseType && arrayContains( model.enumValues, toString( value ) ) ){
+				return " = " & value;
+			}
+		}
+		return "";
+	}
+
+	/** From @graphqlDeprecated( "why" ), or a doc comment's @deprecated line. */
+	private string function deprecation( required struct annotations, required struct documentation ){
+		if( !structKeyExists( arguments.annotations, "graphqlDeprecated" ) && !structKeyExists( arguments.documentation, "deprecated" ) ){
+			return "";
+		}
+		var reason = trim( arguments.annotations.graphqlDeprecated ?: arguments.documentation.deprecated ?: "" );
+		return len( reason ) ? " @deprecated( reason: #JSONSerialize( reason )# )" : " @deprecated";
 	}
 
 	private string function description( required string text, required string indent ){

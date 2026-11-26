@@ -9,14 +9,16 @@ class extends="testbox.system.BaseSpec" {
 		variables.root      = expandPath( "tests/resources/codefirst" );
 		variables.codeOnly  = {
 			"modelPaths"   : [ variables.root & "/models" ],
-			"servicePaths" : [ variables.root & "/services" ]
+			"servicePaths" : [ variables.root & "/services" ],
+			"authorizer"   : ( requirement, context, info ) => isStruct( context ) && ( context.roles ?: [] ).contains( requirement )
 		};
 		variables.graphQLService = new "../../models/GraphQLService"( variables.codeOnly );
 		variables.mixedService   = new "../../models/GraphQLService"( {
 			"modelPaths"          : [ variables.root & "/models" ],
 			"servicePaths"        : [ variables.root & "/services" ],
 			"schemaPaths"         : [ variables.root & "/schema" ],
-			"resolverBasePackage" : variables.root & "/resolvers"
+			"resolverBasePackage" : variables.root & "/resolvers",
+			"authorizer"          : variables.codeOnly.authorizer
 		} );
 	}
 
@@ -127,7 +129,7 @@ class extends="testbox.system.BaseSpec" {
 
 				expect( result.errors ).toBeEmpty();
 				expect( result.data.greet ).toBe( "Howdy, Rob" );
-				expect( asked.sort( "text" ) ).toBe( [ "GreetingService", "WidgetService" ] );
+				expect( asked.sort( "text" ) ).toBe( [ "AdminService", "GreetingService", "WidgetService" ] );
 			} );
 
 		} );
@@ -144,10 +146,10 @@ class extends="testbox.system.BaseSpec" {
 			} );
 
 			it( "lets a hand-written extension and resolver add a field to a generated type", function(){
-				var result = variables.mixedService.execute( "{ widget( id: 7 ) { name slug } }" );
+				var result = variables.mixedService.execute( "{ widget( id: 7 ) { name shelfCode } }" );
 
 				expect( result.errors ).toBeEmpty();
-				expect( result.data.widget.slug ).toBe( "widget-7" );
+				expect( result.data.widget.shelfCode ).toBe( "widget-7" );
 			} );
 
 		} );

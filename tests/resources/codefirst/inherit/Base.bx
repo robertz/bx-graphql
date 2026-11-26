@@ -1,0 +1,8 @@
+class {
+
+	@graphqlQuery
+	string function ping(){
+		return "pong from " & getMetadata( this ).name.listLast( "." );
+	}
+
+}

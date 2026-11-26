@@ -1,0 +1,8 @@
+class extends="Base" {
+
+	@graphqlQuery
+	string function extra(){
+		return "extra";
+	}
+
+}
