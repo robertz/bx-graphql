@@ -1,10 +1,10 @@
 /**
- * Builds and holds the graphql.GraphQL engine: parses/merges the consumer's SDL files
- * and wires convention-based DataFetchers. Built once at construction time — not per
- * request. No WireBox; settings are passed directly to init().
+ * Builds and holds the graphql.GraphQL engine: parses/merges the consumer's SDL files,
+ * adds the SDL generated from annotated classes (SchemaGenerator), and wires
+ * convention-based DataFetchers. Built once at construction time — not per request.
+ * No WireBox; settings are passed directly to init().
  *
- * Deferred (not implemented in this spike): custom scalars, interface/union TypeResolver
- * wiring, introspection toggle.
+ * Deferred: interface/union TypeResolver wiring, introspection toggle.
  */
 class {
 

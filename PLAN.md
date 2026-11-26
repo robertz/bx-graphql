@@ -1,5 +1,9 @@
 # Code-first schema: plan
 
+Status: phases 1 to 5 and the README are done on `code-first-schema`. Left:
+the version bump to 0.2.0 and the release. Where the build differs from this
+plan, the README is right; the differences are listed at the end.
+
 Generate SDL and wire resolvers from annotated BoxLang classes, alongside the
 hand-written `.graphqls` + `{Type}Resolver.bx` convention that exists today.
 Target version: 0.2.0. Nothing that works in 0.1.1 changes behaviour.
@@ -184,3 +188,18 @@ Each phase is its own commit with specs, and leaves the suite green.
 - Structured errors (`{ message, path }` instead of message strings). Worth
   doing next: the reader parses the strings back apart in `GraphQLRoutes.errorOf`.
 - DataLoader batching for bean relations.
+
+## Where the build differs from the plan
+- `@graphqlInputField( "…" )` was added: `@graphqlField` is verbatim, so a
+  list of an output type needed a separate statement for the input.
+- `graphqlType="…"` on a parameter is verbatim (`"ID!"`), not combined with
+  `required`.
+- No SDL default values: an argument left out isn't passed, and the
+  function's own default applies.
+- An input parameter is typed as the bean class (`required Widget input`),
+  not as the input's name: BoxLang has no class called `WidgetInput` to cast to.
+- `resolverBasePackage` stays required when neither `modelPaths` nor
+  `servicePaths` is set, as in 0.1.1.
+- Phase 3's helper is `ClassFiles.bx`; phases 3 to 5 landed as one commit.
+- A `{Type}Resolver.bx` method for a generated operation's field is not an
+  error: the generated method wins.
