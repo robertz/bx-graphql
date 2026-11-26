@@ -237,7 +237,7 @@ string function slug( string separator = "-" ){
 """The name, as a URL would have it."""
 slug(
 	"""What goes between the words."""
-	separator: String = "-"
+	separator: String! = "-"
 ): String
 ```
 
@@ -291,7 +291,7 @@ generates
 type Query {
 	"""One widget by id."""
 	widget( id: ID! ): Widget
-	widgets( limit: Float ): [Widget!]!
+	widgets( limit: Float! = 20 ): [Widget!]!
 }
 
 type Mutation {
@@ -302,13 +302,13 @@ type Mutation {
 
 - The function must be public. The field takes the function's name, or the annotation's value.
 - Each parameter becomes an argument, its type mapped as above and `!` added when `required`. `graphqlType="..."` on a parameter states the type verbatim instead.
-- A default that is a plain string, number or boolean is written into the schema (`limit: Float = 20`). An argument the query leaves out with no such default isn't passed, so the function's own default applies either way.
+- A default that is a plain string, number or boolean is written into the schema, and makes the argument non-null: `limit: Float! = 20` can be left out, but not given as null. An argument the query leaves out isn't passed, so the function's own default applies whether or not it could be written into the schema.
 - A doc comment's `@parameterName ...` line becomes that argument's description. `@graphqlDeprecated( "why" )`, or a doc comment's `@deprecated why`, marks the field deprecated.
 - Parameters named `context` and `env` receive what a resolver's would, and `args` the arguments as plain structs and arrays. None of the three is an argument in the schema.
 - Annotated functions inherited from a parent class count. When a parent and its child are both scanned, the field goes to the child, so the child's instance is the one called; that holds when the child overrides the function with the annotation repeated, too. Two scanned classes that supply the same field with neither descending from the other fail at construction time.
 - The return type is mapped from the function's; `@graphqlReturns( "..." )` states it verbatim, and is needed for `array`, `struct`, `any` or no declared type.
 - A parameter typed as an `@graphqlInput` class receives an instance of that class, filled through its setters. So do nested beans, and lists of them: a property typed `Tag[]`, or typed `array` with `@graphqlInputField( "[TagInput!]" )`. A string for a property typed `date` becomes a date. Type the parameter `struct` (with `graphqlType="WidgetInput!"`) to receive the plain struct.
-- An argument itself given as `null` (`widgets( limit: null )`) gets the function's default, the same as one left out: BoxLang gives a parameter its default whenever it receives null. `args` shows which it was.
+- An argument given as `null` reaches the function as null when the parameter has no default. When it has one, the null is refused rather than quietly replaced, because BoxLang gives a parameter its default whenever it receives null: a plain default is refused by the schema (the argument is non-null), and a default that is an expression (`since = now()`) by an error on that field (`BxGraphQL.NullArgument`).
 - A key given as `null` sets that property to null; a key left out leaves it alone. Both read as null on the bean afterwards, so to tell them apart take `args` as well and look at its keys: `arrayContainsNoCase( structKeyArray( args.input ), "price" )` (`structKeyExists()` is false for a null).
 - One instance of each service class is built at construction time, by `instanceFactory` if given.
 

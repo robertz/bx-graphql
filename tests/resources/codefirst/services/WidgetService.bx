@@ -88,6 +88,16 @@ class extends="../support/BaseService" {
 		];
 	}
 
+	@graphqlQuery
+	string function tagged( string tag = lcase( "DEFAULT" ) ){
+		return arguments.tag;
+	}
+
+	@graphqlQuery
+	string function echoed( string word ){
+		return isNull( arguments.word ) ? "nothing" : arguments.word;
+	}
+
 	string function notExposed(){
 		return "no";
 	}

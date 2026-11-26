@@ -7,8 +7,15 @@
  *
  * Each GraphQL argument goes to the parameter of the same name, its values as graphql-java
  * coerced them (ArgumentValues). One left out isn't passed, so the function's own
- * default applies; so it does for one given as null, since BoxLang gives a parameter
- * its default whenever it receives null. Parameters named `context` and `env`
+ * default applies.
+ *
+ * One given as null is never quietly replaced. BoxLang gives a parameter its default
+ * whenever it receives null, however it is passed, so a null can only reach a
+ * parameter that has no default; for one that has, the field fails and says so.
+ * (A plain default is in the schema as a non-null argument, which refuses the null
+ * before it gets here; this catches the defaults that are expressions.)
+ *
+ * Parameters named `context` and `env`
  * get what a resolver's would, and `args` the arguments as plain structs and arrays —
  * the one place an explicit null can be told from a key that was left out.
  *
@@ -22,6 +29,7 @@ class {
 	variables.models        = {};
 	variables.classFiles    = "";
 	variables.authorizer    = "";
+	variables.defaulted     = "";
 
 	/**
 	 * @instance The service instance, or "" to call the function on the field's source.
@@ -61,6 +69,8 @@ class {
 		}
 
 		var collected = {};
+		// structKeyExists() is false for a key whose value is null
+		var givenKeys = structKeyArray( given );
 		for( var parameter in variables.operation.parameters ){
 			if( parameter.name == "context" ){
 				collected[ parameter.name ] = arguments.environment.getContext();
@@ -70,10 +80,37 @@ class {
 				collected[ parameter.name ] = given;
 			} else if( structKeyExists( given, parameter.name ) && !isNull( given[ parameter.name ] ) ){
 				collected[ parameter.name ] = hydrate( given[ parameter.name ], parameter.type ?: "any", parameter.annotations.graphqlType ?: "" );
+			} else if( arrayContainsNoCase( givenKeys, parameter.name ) && hasDefault( target, parameter ) ){
+				throw(
+					type    = "BxGraphQL.NullArgument",
+					message = "#variables.operation.rootType#.#variables.operation.fieldName#: #parameter.name# was given as null, but it has a default, which would be used instead. Leave #parameter.name# out to take the default."
+				);
 			}
 		}
 
 		return invoke( target, variables.operation.methodName, collected );
+	}
+
+	/**
+	 * Whether the function has a default for this parameter. Asked of the compiled
+	 * function, since metadata's `default` is null for a default that is an expression
+	 * (`since = now()`) just as it is for none.
+	 */
+	private boolean function hasDefault( required any target, required struct parameter ){
+		if( isSimpleValue( variables.defaulted ) ){
+			var found = {};
+			try {
+				for( var declared in arguments.target[ variables.operation.methodName ].getArguments() ){
+					found[ declared.name().getName() ] = declared.hasDefaultValue();
+				}
+			} catch( any e ){
+				for( var known in variables.operation.parameters ){
+					found[ known.name ] = !isNull( known.default );
+				}
+			}
+			variables.defaulted = found;
+		}
+		return variables.defaulted[ arguments.parameter.name ] ?: false;
 	}
 
 	/**

@@ -301,9 +301,15 @@ class {
 				arrayAppend( typeTexts, argumentType );
 				var hint = parameter.documentation.hint ?: "";
 				described = described || len( trim( hint ) ) > 0;
+				// with a default the argument is non-null: it can be left out, but null can't
+				// reach a BoxLang parameter that has a default, so the schema refuses it
+				var defaultText = defaultOf( parameter, argumentType, models );
+				if( len( defaultText ) && right( argumentType, 1 ) != "!" ){
+					argumentType &= "!";
+				}
 				return {
 					"description" : hint,
-					"text"        : parameter.name & ": " & argumentType & defaultOf( parameter, argumentType, models )
+					"text"        : parameter.name & ": " & argumentType & defaultText
 				};
 			} );
 

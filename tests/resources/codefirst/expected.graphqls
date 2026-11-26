@@ -44,10 +44,10 @@ type Widget {
 	"""The name, as a URL would have it."""
 	slug(
 		"""What goes between the words."""
-		separator: String = "-"
+		separator: String! = "-"
 	): String
 	madeBy: Maker
-	label( status: Status = ACTIVE ): String
+	label( status: Status! = ACTIVE ): String
 	cost: Float
 }
 
@@ -77,17 +77,19 @@ type Query {
 	ping: String
 	"""One widget by id."""
 	widget( id: ID! ): Widget
-	widgets( limit: Float = 2 ): [Widget!]!
+	widgets( limit: Float! = 2 ): [Widget!]!
 	whoAmI: String
 	"""Widgets in one state."""
 	widgetsByStatus(
 		"""Which state."""
-		status: Status = ACTIVE
-		order: String = "name"
-		reverse: Boolean = false
+		status: Status! = ACTIVE
+		order: String! = "name"
+		reverse: Boolean! = false
 	): String @deprecated( reason: "Use widgets." )
 	soldSince( since: DateTime! ): String
 	fromMakers( makerIds: [Int!]! ): [Widget!]!
+	tagged( tag: String ): String
+	echoed( word: String ): String
 }
 
 type Mutation {

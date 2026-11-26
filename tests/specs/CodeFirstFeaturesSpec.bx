@@ -122,11 +122,41 @@ class extends="testbox.system.BaseSpec" {
 				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Query\.ping is declared twice.*One\.ping.*Two\.ping" );
 			} );
 
-			it( "leaves an argument given as null to the function's default, as BoxLang does", function(){
-				var result = variables.graphQLService.execute( "{ widgets( limit: null ) { id } }" );
+			it( "gives a null to a parameter with no default", function(){
+				var result = variables.graphQLService.execute( '{ a: echoed( word: null ) b: echoed c: echoed( word: "hi" ) }' );
 
 				expect( result.errors ).toBeEmpty();
-				expect( arrayLen( result.data.widgets ) ).toBe( 2 );
+				expect( result.data.a ).toBe( "nothing" );
+				expect( result.data.b ).toBe( "nothing" );
+				expect( result.data.c ).toBe( "hi" );
+			} );
+
+			it( "refuses a null for an argument with a plain default, rather than quietly using the default", function(){
+				var literal  = variables.graphQLService.execute( "{ widgets( limit: null ) { id } }" );
+				var variable = variables.graphQLService.execute(
+					query          = "query( $limit: Float ){ widgets( limit: $limit ) { id } }",
+					queryVariables = { "limit" : javaCast( "null", "" ) }
+				);
+				var leftOut  = variables.graphQLService.execute( "query( $limit: Float ){ widgets( limit: $limit ) { id } }" );
+
+				expect( arrayLen( literal.errors ) ).toBe( 1 );
+				expect( literal.errors[ 1 ].extensions.classification ).toBe( "ValidationError" );
+				expect( arrayLen( variable.errors ) ).toBe( 1 );
+				expect( leftOut.errors ).toBeEmpty();
+				expect( arrayLen( leftOut.data.widgets ) ).toBe( 2 );
+			} );
+
+			it( "refuses a null for an argument whose default is an expression, and says why", function(){
+				var given   = variables.graphQLService.execute( "{ tagged( tag: null ) ping }" );
+				var leftOut = variables.graphQLService.execute( "{ tagged }" );
+
+				expect( arrayLen( given.errors ) ).toBe( 1 );
+				expect( given.errors[ 1 ].extensions.type ).toBe( "BxGraphQL.NullArgument" );
+				expect( given.errors[ 1 ].message ).toInclude( "tag was given as null" );
+				expect( isNull( given.data.tagged ) ).toBeTrue();
+				expect( given.data.ping ).toBe( "pong" );
+				expect( leftOut.errors ).toBeEmpty();
+				expect( leftOut.data.tagged ).toBe( "default" );
 			} );
 
 			it( "reports a service that can't be built as itself, not as a schema problem", function(){
@@ -138,11 +168,11 @@ class extends="testbox.system.BaseSpec" {
 			it( "writes plain defaults, argument descriptions and deprecation into the schema", function(){
 				var sdl = variables.graphQLService.getGeneratedSDL();
 
-				expect( sdl ).toInclude( 'order: String = "name"' );
-				expect( sdl ).toInclude( "reverse: Boolean = false" );
+				expect( sdl ).toInclude( 'order: String! = "name"' );
+				expect( sdl ).toInclude( "reverse: Boolean! = false" );
 				expect( sdl ).toInclude( "widgetsByStatus(" );
-				expect( sdl ).toInclude( "status: Status = ACTIVE" );
-				expect( sdl ).toInclude( "label( status: Status = ACTIVE ): String" );
+				expect( sdl ).toInclude( "status: Status! = ACTIVE" );
+				expect( sdl ).toInclude( "label( status: Status! = ACTIVE ): String" );
 				expect( sdl ).toInclude( '"""Which state."""' );
 				expect( sdl ).toInclude( '): String @deprecated( reason: "Use widgets." )' );
 				expect( sdl ).toInclude( 'title: String @deprecated( reason: "Use name" )' );
