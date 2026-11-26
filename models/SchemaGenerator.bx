@@ -1,0 +1,208 @@
+/**
+ * Code-first schema: turns annotated classes into SDL, which GraphQLService merges
+ * with any hand-written .graphqls files.
+ *
+ *   modelPaths   — classes marked @graphqlType and/or @graphqlInput become a type and/or
+ *                  an input, a field per property.
+ *   servicePaths — public functions marked @graphqlQuery or @graphqlMutation become
+ *                  fields of Query or Mutation.
+ *
+ * Reads getClassMetadata(), never getMetaData(): with bx-compat-cfml installed the
+ * latter folds annotations into the top level and has no `annotations` key at all.
+ */
+class {
+
+	static {
+		INJECTED_PARAMETERS = [ "context", "env" ];
+	}
+
+	variables.classFiles = "";
+
+	function init( required any classFiles ){
+		variables.classFiles = arguments.classFiles;
+		return this;
+	}
+
+	/**
+	 * @existingTypeNames Types and scalars the hand-written schema already declares.
+	 *
+	 * @return { sdl, models : { SimpleName : { classPath, typeName, inputName, meta } },
+	 *           operations : [ { rootType, fieldName, classPath, methodName, parameters, meta } ] }
+	 */
+	struct function generate( required array modelPaths, required array servicePaths, required array existingTypeNames ){
+		var models     = modelsIn( arguments.modelPaths );
+		var mapper     = new "TypeMapper"( models );
+		var operations = operationsIn( arguments.servicePaths );
+		var blocks     = [];
+
+		for( var simpleName in structKeyArray( models ).sort( "textnocase" ) ){
+			var model = models[ simpleName ];
+			if( len( model.typeName ) ){
+				arrayAppend( blocks, beanBlock( "type", model.typeName, model, mapper, false ) );
+			}
+			if( len( model.inputName ) ){
+				arrayAppend( blocks, beanBlock( "input", model.inputName, model, mapper, true ) );
+			}
+		}
+
+		for( var rootType in [ "Query", "Mutation" ] ){
+			var fields = operations.filter( ( operation ) => operation.rootType == rootType );
+			if( arrayLen( fields ) ){
+				var keyword = arrayContains( arguments.existingTypeNames, rootType ) ? "extend type" : "type";
+				arrayAppend(
+					blocks,
+					"#keyword# #rootType# {" & char( 10 ) & fields.map( ( operation ) => operationField( operation, mapper ) ).toList( char( 10 ) ) & char( 10 ) & "}"
+				);
+			}
+		}
+
+		var sdl = arrayToList( blocks, char( 10 ) & char( 10 ) );
+		for( var scalarName in [ "DateTime", "Long" ] ){
+			if( reFind( "[:\[] ?#scalarName#\b", sdl ) && !arrayContains( arguments.existingTypeNames, scalarName ) ){
+				sdl = "scalar #scalarName#" & char( 10 ) & char( 10 ) & sdl;
+			}
+		}
+
+		return { "sdl" : sdl, "models" : models, "operations" : operations };
+	}
+
+	private struct function modelsIn( required array modelPaths ){
+		var models = {};
+		for( var classPath in variables.classFiles.under( arguments.modelPaths, "modelPaths" ) ){
+			var meta        = variables.classFiles.metadataOf( classPath );
+			var annotations = meta.annotations;
+			if( !structKeyExists( annotations, "graphqlType" ) && !structKeyExists( annotations, "graphqlInput" ) ){
+				continue;
+			}
+			if( structKeyExists( models, meta.simpleName ) ){
+				throw(
+					type    = "BxGraphQL.ConfigurationException",
+					message = "Two annotated classes are named #meta.simpleName#: #models[ meta.simpleName ].classPath# and #classPath#."
+				);
+			}
+			models[ meta.simpleName ] = {
+				"classPath" : classPath,
+				"meta"      : meta,
+				"typeName"  : structKeyExists( annotations, "graphqlType" ) ? ( len( annotations.graphqlType ) ? annotations.graphqlType : meta.simpleName ) : "",
+				"inputName" : structKeyExists( annotations, "graphqlInput" ) ? ( len( annotations.graphqlInput ) ? annotations.graphqlInput : meta.simpleName & "Input" ) : ""
+			};
+		}
+		return models;
+	}
+
+	private array function operationsIn( required array servicePaths ){
+		var operations = [];
+		var claimed    = {};
+		for( var classPath in variables.classFiles.under( arguments.servicePaths, "servicePaths" ) ){
+			var meta = variables.classFiles.metadataOf( classPath );
+			for( var fn in meta.functions ){
+				for( var rootType in [ "Query", "Mutation" ] ){
+					if( !structKeyExists( fn.annotations, "graphql" & rootType ) ){
+						continue;
+					}
+					var where = "#meta.name#.#fn.name#()";
+					if( fn.access != "public" ){
+						throw( type = "BxGraphQL.ConfigurationException", message = "#where# is marked @graphql#rootType# but isn't public." );
+					}
+					var fieldName = len( fn.annotations[ "graphql" & rootType ] ) ? fn.annotations[ "graphql" & rootType ] : fn.name;
+					var claimKey  = rootType & "." & fieldName;
+					if( structKeyExists( claimed, claimKey ) ){
+						throw(
+							type    = "BxGraphQL.ConfigurationException",
+							message = "#rootType#.#fieldName# is declared twice: by #claimed[ claimKey ]# and #where#."
+						);
+					}
+					claimed[ claimKey ] = where;
+					arrayAppend( operations, {
+						"rootType"   : rootType,
+						"fieldName"  : fieldName,
+						"classPath"  : classPath,
+						"methodName" : fn.name,
+						"parameters" : fn.parameters,
+						"meta"       : fn,
+						"where"      : where
+					} );
+				}
+			}
+		}
+		return operations;
+	}
+
+	private string function beanBlock( required string keyword, required string name, required struct model, required any mapper, required boolean forInput ){
+		var lines = [];
+		for( var property in propertiesOf( arguments.model.meta ) ){
+			var annotations = property.annotations;
+			if( structKeyExists( annotations, "graphqlIgnore" ) || ( arguments.forInput && structKeyExists( annotations, "graphqlReadOnly" ) ) ){
+				continue;
+			}
+			var where = "#arguments.model.meta.name#.#property.name#";
+			var fieldType = "";
+			if( arguments.forInput && len( annotations.graphqlInputField ?: "" ) ){
+				fieldType = annotations.graphqlInputField;
+			} else if( len( annotations.graphqlField ?: "" ) ){
+				fieldType = annotations.graphqlField;
+			} else {
+				fieldType = structKeyExists( annotations, "graphqlId" )
+					? "ID"
+					: arguments.mapper.nameFor( property.type ?: "any", arguments.forInput, where, arguments.forInput ? "@graphqlInputField( ""..."" )" : "@graphqlField( ""..."" )" );
+				if( isBoolean( annotations.required ?: "" ) && annotations.required ){
+					fieldType &= "!";
+				}
+			}
+			arrayAppend( lines, description( property.documentation.hint ?: "", char( 9 ) ) & char( 9 ) & property.name & ": " & fieldType );
+		}
+		if( !arrayLen( lines ) ){
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "#arguments.model.meta.name# would make #arguments.keyword# #arguments.name# with no fields."
+			);
+		}
+		return description( arguments.model.meta.documentation.hint ?: "", "" ) & "#arguments.keyword# #arguments.name# {" & char( 10 ) & arrayToList( lines, char( 10 ) ) & char( 10 ) & "}";
+	}
+
+	/** A class's properties, its parents' first; a child's redeclaration replaces the parent's in place. */
+	private array function propertiesOf( required struct meta ){
+		var inherited = structIsEmpty( arguments.meta.extends ?: {} ) ? [] : propertiesOf( arguments.meta.extends );
+		for( var property in arguments.meta.properties ){
+			var at = inherited.find( ( candidate ) => candidate.name == property.name );
+			if( at ){
+				inherited[ at ] = property;
+			} else {
+				arrayAppend( inherited, property );
+			}
+		}
+		return inherited;
+	}
+
+	private string function operationField( required struct operation, required any mapper ){
+		var fn          = arguments.operation.meta;
+		var where       = arguments.operation.where;
+		var mapper      = arguments.mapper;
+		var sdlArguments = fn.parameters
+			.filter( ( parameter ) => !arrayContainsNoCase( static.INJECTED_PARAMETERS, parameter.name ) )
+			.map( ( parameter ) => {
+				if( len( parameter.annotations.graphqlType ?: "" ) ){
+					return parameter.name & ": " & parameter.annotations.graphqlType;
+				}
+				var argumentType = mapper.nameFor( parameter.type ?: "any", true, "#where#'s parameter #parameter.name#", "graphqlType=""..."" on the parameter" );
+				return parameter.name & ": " & argumentType & ( parameter.required ? "!" : "" );
+			} );
+
+		var returnType = len( fn.annotations.graphqlReturns ?: "" )
+			? fn.annotations.graphqlReturns
+			: arguments.mapper.nameFor( fn.returnType ?: "any", false, "#where#'s return", "@graphqlReturns( ""..."" )" );
+
+		return description( fn.documentation.hint ?: "", char( 9 ) )
+			& char( 9 ) & arguments.operation.fieldName
+			& ( arrayLen( sdlArguments ) ? "( " & arrayToList( sdlArguments, ", " ) & " )" : "" )
+			& ": " & returnType;
+	}
+
+	private string function description( required string text, required string indent ){
+		if( !len( trim( arguments.text ) ) ){
+			return "";
+		}
+		return arguments.indent & '"""' & replace( trim( arguments.text ), '"""', '\"""', "all" ) & '"""' & char( 10 );
+	}
+
+}

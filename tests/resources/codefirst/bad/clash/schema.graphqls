@@ -1,0 +1,7 @@
+type Query {
+	version: String
+}
+
+type Widget {
+	id: ID
+}

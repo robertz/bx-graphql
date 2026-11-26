@@ -11,12 +11,8 @@
  * No DI container here (no WireBox equivalent) — resolver existence is checked by
  * fileExists() against the configured resolverBasePackage directory, then instantiated
  * directly via new, rather than by pattern-matching a framework's not-found exception.
- *
- * BoxLang's `new "path"()` only resolves paths relative to the FILE the `new` call is
- * written in (confirmed empirically — there is no absolute-filesystem-path form, and
- * createObject("component", ...) has the same restriction). resolverBasePackage arrives
- * as an absolute directory, so it's converted to a path relative to this file's own
- * directory before every `new` call.
+ * resolverBasePackage arrives as an absolute directory ("" for none); ClassFiles does
+ * the instantiating.
  */
 class {
 
@@ -28,7 +24,6 @@ class {
 	variables.hasResolver              = false;
 	variables.resolverChecked          = false;
 	variables.propertyDataFetcherCache = {};
-	variables.selfDirectory            = getDirectoryFromPath( getCurrentTemplatePath() );
 
 	function init(
 		required string typeName,
@@ -92,38 +87,13 @@ class {
 		variables.resolverChecked = true;
 
 		var resolverPath = variables.resolverBasePackage & "/" & variables.typeName & "Resolver";
-		if( !fileExists( expandPath( resolverPath & ".bx" ) ) ){
+		if( !len( variables.resolverBasePackage ) || !fileExists( expandPath( resolverPath & ".bx" ) ) ){
 			variables.hasResolver = false;
 			return;
 		}
 
-		variables.resolverInstance = new "#toRelativePath( resolverPath )#"();
+		variables.resolverInstance = new "ClassFiles"().instantiate( resolverPath );
 		variables.hasResolver      = true;
-	}
-
-	/**
-	 * Converts an absolute path into one relative to this file's own directory, the only
-	 * form BoxLang's `new` accepts for a dynamically-computed class path.
-	 */
-	private string function toRelativePath( required string absolutePath ){
-		var fromParts = listToArray( reReplace( variables.selfDirectory, "[\\/]+$", "" ), "/" );
-		var toParts   = listToArray( arguments.absolutePath, "/" );
-
-		var common = 0;
-		while( common < arrayLen( fromParts ) && common < arrayLen( toParts ) && fromParts[ common + 1 ] == toParts[ common + 1 ] ){
-			common++;
-		}
-
-		var upSegments = arrayLen( fromParts ) - common;
-		var relativeParts = [];
-		for( var i = 1; i <= upSegments; i++ ){
-			arrayAppend( relativeParts, ".." );
-		}
-		for( var i = common + 1; i <= arrayLen( toParts ); i++ ){
-			arrayAppend( relativeParts, toParts[ i ] );
-		}
-
-		return arrayToList( relativeParts, "/" );
 	}
 
 }

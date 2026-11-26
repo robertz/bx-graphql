@@ -1,0 +1,7 @@
+type Query {
+	version: String
+}
+
+extend type Widget {
+	slug: String
+}

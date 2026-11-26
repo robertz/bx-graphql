@@ -1,0 +1,7 @@
+class accessors="true" {
+
+	/** When it was first saved. */
+	@graphqlReadOnly
+	property name="createdAt" type="date";
+
+}

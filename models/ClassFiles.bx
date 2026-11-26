@@ -1,0 +1,61 @@
+/**
+ * Finds, describes and instantiates classes by absolute path. BoxLang's `new "path"()`
+ * and getClassMetadata() only take a path relative to the file the call is written in
+ * (there is no absolute-filesystem-path form), so every absolute path is first made
+ * relative to this file's own directory.
+ */
+class {
+
+	variables.selfDirectory = getDirectoryFromPath( getCurrentTemplatePath() );
+
+	/** Absolute paths, without the extension, of every .bx class under the given files and directories (recursively). */
+	array function under( required array configuredPaths, required string settingName ){
+		var found = [];
+		for( var rawPath in arguments.configuredPaths ){
+			var expandedPath = expandPath( rawPath );
+			if( directoryExists( expandedPath ) ){
+				arrayAppend( found, directoryList( expandedPath, true, "path", "*.bx" ), true );
+			} else if( fileExists( expandedPath ) ){
+				arrayAppend( found, expandedPath );
+			} else if( fileExists( expandedPath & ".bx" ) ){
+				arrayAppend( found, expandedPath & ".bx" );
+			} else {
+				throw(
+					type    = "BxGraphQL.ConfigurationException",
+					message = "Configured #arguments.settingName# entry does not exist: " & rawPath & " (resolved to " & expandedPath & ")"
+				);
+			}
+		}
+		arraySort( found, "text" );
+		return found.map( ( filePath ) => reReplace( filePath, "\.bx$", "" ) );
+	}
+
+	struct function metadataOf( required string classPath ){
+		return getClassMetadata( toRelativePath( arguments.classPath ) );
+	}
+
+	any function instantiate( required string classPath ){
+		return new "#toRelativePath( arguments.classPath )#"();
+	}
+
+	string function toRelativePath( required string absolutePath ){
+		var fromParts = listToArray( reReplace( variables.selfDirectory, "[\\/]+$", "" ), "/\" );
+		var toParts   = listToArray( arguments.absolutePath, "/\" );
+
+		var common = 0;
+		while( common < arrayLen( fromParts ) && common < arrayLen( toParts ) && fromParts[ common + 1 ] == toParts[ common + 1 ] ){
+			common++;
+		}
+
+		var relativeParts = [];
+		for( var i = 1; i <= arrayLen( fromParts ) - common; i++ ){
+			arrayAppend( relativeParts, ".." );
+		}
+		for( var i = common + 1; i <= arrayLen( toParts ); i++ ){
+			arrayAppend( relativeParts, toParts[ i ] );
+		}
+
+		return arrayToList( relativeParts, "/" );
+	}
+
+}

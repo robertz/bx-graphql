@@ -1,0 +1,66 @@
+/**
+ * The DataFetcher behind one generated Query/Mutation field: calls the service method
+ * it was generated from. Wrapped as a graphql.schema.DataFetcher via createDynamicProxy.
+ *
+ * Each GraphQL argument goes to the parameter of the same name; one left out isn't
+ * passed, so the function's own default applies. Parameters named `context` and `env`
+ * get what a resolver's would. An argument for a parameter typed as an @graphqlInput
+ * class arrives as an instance of it, set through its setters.
+ */
+class {
+
+	variables.instance   = "";
+	variables.methodName = "";
+	variables.parameters = [];
+	variables.models     = {};
+	variables.classFiles = "";
+
+	function init( required any instance, required string methodName, required array parameters, required struct models, required any classFiles ){
+		variables.instance   = arguments.instance;
+		variables.methodName = arguments.methodName;
+		variables.parameters = arguments.parameters;
+		variables.models     = arguments.models;
+		variables.classFiles = arguments.classFiles;
+		return this;
+	}
+
+	any function get( required any environment ){
+		var given     = JSONDeserialize( JSONSerialize( arguments.environment.getArguments() ) );
+		var collected = {};
+
+		for( var parameter in variables.parameters ){
+			if( parameter.name == "context" ){
+				collected[ parameter.name ] = arguments.environment.getContext();
+			} else if( parameter.name == "env" ){
+				collected[ parameter.name ] = arguments.environment;
+			} else if( structKeyExists( given, parameter.name ) && !isNull( given[ parameter.name ] ) ){
+				collected[ parameter.name ] = hydrate( given[ parameter.name ], parameter.type ?: "any" );
+			}
+		}
+
+		return invoke( variables.instance, variables.methodName, collected );
+	}
+
+	private any function hydrate( required any value, required string boxType ){
+		if( right( arguments.boxType, 2 ) == "[]" && isArray( arguments.value ) ){
+			var itemType = left( arguments.boxType, len( arguments.boxType ) - 2 );
+			return arguments.value.map( ( item ) => isNull( item ) ? javaCast( "null", "" ) : hydrate( item, itemType ) );
+		}
+
+		var simpleName = listLast( arguments.boxType, "." );
+		if( !isStruct( arguments.value ) || !structKeyExists( variables.models, simpleName ) || !len( variables.models[ simpleName ].inputName ) ){
+			return arguments.value;
+		}
+
+		var model = variables.models[ simpleName ];
+		var bean  = variables.classFiles.instantiate( model.classPath );
+		for( var property in model.meta.properties ){
+			if( !structKeyExists( arguments.value, property.name ) || isNull( arguments.value[ property.name ] ) || !structKeyExists( bean, "set" & property.name ) ){
+				continue;
+			}
+			invoke( bean, "set" & property.name, [ hydrate( arguments.value[ property.name ], property.type ?: "any" ) ] );
+		}
+		return bean;
+	}
+
+}

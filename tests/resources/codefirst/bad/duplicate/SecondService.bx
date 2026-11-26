@@ -1,0 +1,8 @@
+class {
+
+	@graphqlQuery( "ping" )
+	string function other(){
+		return "second";
+	}
+
+}

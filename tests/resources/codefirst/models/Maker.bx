@@ -1,0 +1,7 @@
+@graphqlType
+@graphqlInput( "MakerDetails" )
+class accessors="true" {
+
+	property name="name" type="string" required="true";
+
+}

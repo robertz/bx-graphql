@@ -10,12 +10,15 @@ class {
 
 	property name="settings";
 
-	variables.javaClass = "";
-	variables.engine    = "";
+	variables.javaClass    = "";
+	variables.engine       = "";
+	variables.classFiles   = "";
+	variables.generatedSDL = "";
 
 	function init( required struct settings ){
 		variables.settings  = arguments.settings;
-		variables.javaClass = new "JavaClassFactory"();
+		variables.javaClass  = new "JavaClassFactory"();
+		variables.classFiles = new "ClassFiles"();
 		buildSchema();
 		return this;
 	}
@@ -26,6 +29,16 @@ class {
 
 	any function getSchema(){
 		return variables.engine.getGraphQLSchema();
+	}
+
+	/** The SDL generated from modelPaths and servicePaths; "" when neither is set. */
+	string function getGeneratedSDL(){
+		return variables.generatedSDL;
+	}
+
+	/** The whole executable schema as SDL, hand-written and generated together. */
+	string function printSchema(){
+		return variables.javaClass.create( "graphql.schema.idl.SchemaPrinter" ).init().print( getSchema() );
 	}
 
 	/**
@@ -94,8 +107,8 @@ class {
 	private void function buildSchema(){
 		validateSettings();
 
-		var schemaFiles = resolveSchemaFiles( variables.settings.schemaPaths );
-		if( arrayLen( schemaFiles ) == 0 ){
+		var schemaFiles = resolveSchemaFiles( variables.settings.schemaPaths ?: [] );
+		if( hasSetting( "schemaPaths" ) && arrayLen( schemaFiles ) == 0 ){
 			throw(
 				type    = "BxGraphQL.ConfigurationException",
 				message = "schemaPaths did not resolve to any .graphqls files.",
@@ -103,31 +116,80 @@ class {
 			);
 		}
 
-		var mergedRegistry       = parseAndMergeSchemas( schemaFiles );
-		var runtimeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.RuntimeWiring" ).newRuntimeWiring();
+		var mergedRegistry = parseAndMergeSchemas( schemaFiles );
+		var generated      = new "SchemaGenerator"( variables.classFiles ).generate(
+			modelPaths        = variables.settings.modelPaths ?: [],
+			servicePaths      = variables.settings.servicePaths ?: [],
+			existingTypeNames = declaredNamesIn( mergedRegistry )
+		);
+		variables.generatedSDL = generated.sdl;
 
-		wireScalars( runtimeWiringBuilder, mergedRegistry );
-		wireResolvers( runtimeWiringBuilder, mergedRegistry );
+		try {
+			if( len( generated.sdl ) ){
+				mergedRegistry = mergedRegistry.merge( variables.javaClass.create( "graphql.schema.idl.SchemaParser" ).init().parse( generated.sdl ) );
+			}
 
-		var runtimeWiring   = runtimeWiringBuilder.build();
-		var schemaGenerator = variables.javaClass.create( "graphql.schema.idl.SchemaGenerator" ).init();
-		var graphQLSchema   = schemaGenerator.makeExecutableSchema( mergedRegistry, runtimeWiring );
+			var runtimeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.RuntimeWiring" ).newRuntimeWiring();
+			wireScalars( runtimeWiringBuilder, mergedRegistry );
+			wireResolvers( runtimeWiringBuilder, mergedRegistry, generated );
+
+			var graphQLSchema = variables.javaClass.create( "graphql.schema.idl.SchemaGenerator" ).init()
+				.makeExecutableSchema( mergedRegistry, runtimeWiringBuilder.build() );
+		} catch( "BxGraphQL.ConfigurationException" e ){
+			rethrow;
+		} catch( any e ){
+			// with nothing generated, graphql-java's own error is the whole story, as before
+			if( !len( generated.sdl ) ){
+				rethrow;
+			}
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "The schema generated from modelPaths/servicePaths doesn't fit: " & e.message,
+				detail  = generated.sdl
+			);
+		}
 
 		variables.engine = variables.javaClass.create( "graphql.GraphQL" ).newGraphQL( graphQLSchema ).build();
 	}
 
+	private boolean function hasSetting( required string name ){
+		return isArray( variables.settings[ arguments.name ] ?: "" ) && arrayLen( variables.settings[ arguments.name ] ) > 0;
+	}
+
+	private array function declaredNamesIn( required any typeRegistry ){
+		var names = [];
+		arrayAppend( names, arguments.typeRegistry.types().keySet().toArray(), true );
+		arrayAppend( names, arguments.typeRegistry.scalars().keySet().toArray(), true );
+		return names.map( ( name ) => toString( name ) );
+	}
+
+	/**
+	 * A schema has to come from somewhere: .graphqls files (schemaPaths), annotated
+	 * classes (modelPaths, servicePaths), or both. Without annotated classes every
+	 * resolver is a {Type}Resolver.bx, so resolverBasePackage is required, as it
+	 * always was; with them it is optional.
+	 */
 	private void function validateSettings(){
-		if( !structKeyExists( variables.settings, "schemaPaths" ) || !isArray( variables.settings.schemaPaths ) || arrayLen( variables.settings.schemaPaths ) == 0 ){
+		for( var name in [ "schemaPaths", "modelPaths", "servicePaths" ] ){
+			if( structKeyExists( variables.settings, name ) && !isArray( variables.settings[ name ] ) ){
+				throw( type = "BxGraphQL.ConfigurationException", message = "#name# must be an array of paths." );
+			}
+		}
+		var codeFirst = hasSetting( "modelPaths" ) || hasSetting( "servicePaths" );
+		if( !hasSetting( "schemaPaths" ) && !codeFirst ){
 			throw(
 				type    = "BxGraphQL.ConfigurationException",
 				message = "No schemaPaths configured for bx-graphql."
 			);
 		}
-		if( !len( trim( variables.settings.resolverBasePackage ?: "" ) ) ){
+		if( !codeFirst && !len( trim( variables.settings.resolverBasePackage ?: "" ) ) ){
 			throw(
 				type    = "BxGraphQL.ConfigurationException",
 				message = "No resolverBasePackage configured for bx-graphql."
 			);
+		}
+		if( structKeyExists( variables.settings, "instanceFactory" ) && !isFunctionValue( variables.settings.instanceFactory ) ){
+			throw( type = "BxGraphQL.ConfigurationException", message = "instanceFactory must be a function: ( classPath, meta ) => instance." );
 		}
 	}
 
@@ -139,7 +201,10 @@ class {
 	 * as-is aside from expandPath().
 	 */
 	private string function normalizeResolverBasePackage( required string resolverBasePackage ){
-		var normalized = arguments.resolverBasePackage;
+		var normalized = trim( arguments.resolverBasePackage );
+		if( !len( normalized ) ){
+			return "";
+		}
 		if( !find( "/", normalized ) && !find( "\", normalized ) ){
 			normalized = replace( normalized, ".", "/", "all" );
 		}
@@ -228,8 +293,15 @@ class {
 		return isCustomFunction( arguments.value ) || isClosure( arguments.value );
 	}
 
-	private void function wireResolvers( required any runtimeWiringBuilder, required any typeRegistry ){
-		var entryIterator = arguments.typeRegistry.types().entrySet().iterator();
+	/**
+	 * Every object type gets the convention as its default fetcher ({Type}Resolver.bx,
+	 * else the field read off the parent). A field generated from a service method
+	 * gets that method instead.
+	 */
+	private void function wireResolvers( required any runtimeWiringBuilder, required any typeRegistry, required struct generated ){
+		var entryIterator       = arguments.typeRegistry.types().entrySet().iterator();
+		var resolverBasePackage = normalizeResolverBasePackage( variables.settings.resolverBasePackage ?: "" );
+		var instances           = {};
 
 		while( entryIterator.hasNext() ){
 			var entry = entryIterator.next();
@@ -240,18 +312,43 @@ class {
 
 			var adapter = new "DataFetcherAdapter"(
 				typeName            = typeName,
-				resolverBasePackage = normalizeResolverBasePackage( variables.settings.resolverBasePackage ),
+				resolverBasePackage = resolverBasePackage,
 				javaClass           = variables.javaClass
 			);
-			var dataFetcherProxy = createDynamicProxy( adapter, "graphql.schema.DataFetcher" );
-
-			var typeWiring = variables.javaClass.create( "graphql.schema.idl.TypeRuntimeWiring" )
+			var typeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.TypeRuntimeWiring" )
 				.newTypeWiring( typeName )
-				.defaultDataFetcher( dataFetcherProxy )
-				.build();
+				.defaultDataFetcher( createDynamicProxy( adapter, "graphql.schema.DataFetcher" ) );
 
-			arguments.runtimeWiringBuilder.type( typeWiring );
+			for( var operation in arguments.generated.operations ){
+				if( operation.rootType != typeName ){
+					continue;
+				}
+				if( !structKeyExists( instances, operation.classPath ) ){
+					instances[ operation.classPath ] = serviceInstance( operation.classPath );
+				}
+				var fetcher = new "MethodDataFetcher"(
+					instance   = instances[ operation.classPath ],
+					methodName = operation.methodName,
+					parameters = operation.parameters,
+					models     = arguments.generated.models,
+					classFiles = variables.classFiles
+				);
+				typeWiringBuilder = typeWiringBuilder.dataFetcher( operation.fieldName, createDynamicProxy( fetcher, "graphql.schema.DataFetcher" ) );
+			}
+
+			arguments.runtimeWiringBuilder.type( typeWiringBuilder.build() );
 		}
+	}
+
+	private any function serviceInstance( required string classPath ){
+		if( !structKeyExists( variables.settings, "instanceFactory" ) ){
+			return variables.classFiles.instantiate( arguments.classPath );
+		}
+		var instance = variables.settings.instanceFactory( arguments.classPath, variables.classFiles.metadataOf( arguments.classPath ) );
+		if( isNull( instance ) || !isObject( instance ) ){
+			throw( type = "BxGraphQL.ConfigurationException", message = "instanceFactory returned no instance for #arguments.classPath#." );
+		}
+		return instance;
 	}
 
 }

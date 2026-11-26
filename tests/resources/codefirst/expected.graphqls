@@ -1,0 +1,52 @@
+scalar DateTime
+
+type Maker {
+	name: String!
+}
+
+input MakerDetails {
+	name: String!
+}
+
+type Tag {
+	label: String
+}
+
+"""A thing we sell."""
+type Widget {
+	"""When it was first saved."""
+	createdAt: DateTime
+	id: ID
+	"""What it's called on the shelf."""
+	name: String!
+	price: Float
+	stock: Int
+	active: Boolean
+	maker: Maker
+	tags: [Tag!]
+}
+
+"""A thing we sell."""
+input WidgetInput {
+	id: ID
+	"""What it's called on the shelf."""
+	name: String!
+	price: Float
+	stock: Int
+	active: Boolean
+	maker: MakerDetails
+	tags: [String!]
+}
+
+type Query {
+	greet( name: String! ): String
+	"""One widget by id."""
+	widget( id: ID! ): Widget
+	widgets( limit: Float ): [Widget!]!
+	whoAmI: String
+}
+
+type Mutation {
+	saveWidget( input: WidgetInput! ): String!
+	renameWidget( id: ID!, name: String! ): Widget
+}

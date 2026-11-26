@@ -1,0 +1,67 @@
+/**
+ * Maps a BoxLang type name (a property's, a parameter's, a return type's) to a GraphQL
+ * type name. `models` is every annotated bean, keyed by the class's simple name:
+ * { typeName, inputName } with "" for the one a class isn't.
+ */
+class {
+
+	static {
+		BUILT_IN = {
+			"string"   : "String",
+			"boolean"  : "Boolean",
+			"integer"  : "Int",
+			"int"      : "Int",
+			"numeric"  : "Float",
+			"float"    : "Float",
+			"double"   : "Float",
+			"long"     : "Long",
+			"date"     : "DateTime",
+			"datetime" : "DateTime"
+		};
+	}
+
+	variables.models = {};
+
+	function init( required struct models ){
+		variables.models = arguments.models;
+		return this;
+	}
+
+	/**
+	 * @boxType As BoxLang's metadata gives it: "numeric", "Widget", "models.Widget", "Widget[]".
+	 * @forInput True for an argument or an input's field: a bean then maps to its input.
+	 * @where Names the property or function in the error for a type that has no mapping.
+	 * @overrideAnnotation The annotation that states the type explicitly, for that error.
+	 */
+	string function nameFor( required string boxType, required boolean forInput, required string where, required string overrideAnnotation ){
+		var typeName = trim( arguments.boxType );
+
+		if( right( typeName, 2 ) == "[]" ){
+			return "[" & nameFor( left( typeName, len( typeName ) - 2 ), arguments.forInput, arguments.where, arguments.overrideAnnotation ) & "!]";
+		}
+		if( structKeyExists( static.BUILT_IN, typeName ) ){
+			return static.BUILT_IN[ typeName ];
+		}
+
+		var simpleName = listLast( typeName, "." );
+		if( structKeyExists( variables.models, simpleName ) ){
+			var model = variables.models[ simpleName ];
+			if( arguments.forInput && len( model.inputName ) ){
+				return model.inputName;
+			}
+			if( !arguments.forInput && len( model.typeName ) ){
+				return model.typeName;
+			}
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "#arguments.where# uses #simpleName# as an #arguments.forInput ? 'input' : 'output'#, but that class isn't marked #arguments.forInput ? '@graphqlInput' : '@graphqlType'#."
+			);
+		}
+
+		throw(
+			type    = "BxGraphQL.ConfigurationException",
+			message = "#arguments.where# has type '#typeName#', which has no GraphQL equivalent. State it with #arguments.overrideAnnotation#."
+		);
+	}
+
+}

@@ -1,0 +1,7 @@
+@graphqlType
+class accessors="true" {
+
+	property name="name" type="string";
+	property name="extras" type="struct";
+
+}

@@ -1,0 +1,196 @@
+/**
+ * Code-first schema end-to-end: SDL generated from the annotated beans and services
+ * under tests/resources/codefirst, alone and merged with a hand-written file.
+ * See GraphQLServiceSpec for why paths go through expandPath().
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		variables.root      = expandPath( "tests/resources/codefirst" );
+		variables.codeOnly  = {
+			"modelPaths"   : [ variables.root & "/models" ],
+			"servicePaths" : [ variables.root & "/services" ]
+		};
+		variables.graphQLService = new "../../models/GraphQLService"( variables.codeOnly );
+		variables.mixedService   = new "../../models/GraphQLService"( {
+			"modelPaths"          : [ variables.root & "/models" ],
+			"servicePaths"        : [ variables.root & "/services" ],
+			"schemaPaths"         : [ variables.root & "/schema" ],
+			"resolverBasePackage" : variables.root & "/resolvers"
+		} );
+	}
+
+	function run(){
+		describe( "Schema generated from annotated classes", function(){
+
+			it( "matches the expected SDL", function(){
+				expect( trim( variables.graphQLService.getGeneratedSDL() ) )
+					.toBe( trim( fileRead( variables.root & "/expected.graphqls" ) ) );
+			} );
+
+			it( "leaves out unannotated classes, ignored properties and unannotated or private functions", function(){
+				var schema = variables.graphQLService.printSchema();
+
+				expect( schema ).notToInclude( "Unlisted" );
+				expect( schema ).notToInclude( "passwordHash" );
+				expect( schema ).notToInclude( "notExposed" );
+				expect( schema ).notToInclude( "helper" );
+			} );
+
+			it( "keeps a read-only property out of the input", function(){
+				var result = variables.graphQLService.execute( '{ __type( name: "WidgetInput" ) { inputFields { name } } }' );
+				var names  = result.data.__type.inputFields.map( ( field ) => field.name );
+
+				expect( names ).toInclude( "name" );
+				expect( names ).notToInclude( "createdAt" );
+			} );
+
+			it( "carries doc comments through as descriptions", function(){
+				var result = variables.graphQLService.execute( '{ __type( name: "Widget" ) { description } }' );
+
+				expect( result.data.__type.description ).toBe( "A thing we sell." );
+			} );
+
+		} );
+
+		describe( "Operations generated from service methods", function(){
+
+			it( "answers a query from a bean, nested beans, lists and an inherited date included", function(){
+				var result = variables.graphQLService.execute(
+					"{ widget( id: 4 ) { id name price stock active createdAt maker { name } tags { label } } }"
+				);
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.id ).toBe( "4" );
+				expect( result.data.widget.name ).toBe( "Widget 4" );
+				expect( result.data.widget.price ).toBe( 9.5 );
+				expect( result.data.widget.stock ).toBe( 3 );
+				expect( result.data.widget.active ).toBeTrue();
+				expect( result.data.widget.createdAt ).toBe( "2026-01-31T09:30:00Z" );
+				expect( result.data.widget.maker.name ).toBe( "Acme" );
+				expect( result.data.widget.tags[ 1 ].label ).toBe( "new" );
+			} );
+
+			it( "leaves an argument that wasn't given to the function's own default", function(){
+				var byDefault = variables.graphQLService.execute( "{ widgets { id } }" );
+				var asked     = variables.graphQLService.execute( "{ widgets( limit: 3 ) { id } }" );
+
+				expect( byDefault.errors ).toBeEmpty();
+				expect( arrayLen( byDefault.data.widgets ) ).toBe( 2 );
+				expect( arrayLen( asked.data.widgets ) ).toBe( 3 );
+			} );
+
+			it( "passes context and env to parameters of those names, and keeps them out of the schema", function(){
+				var result = variables.graphQLService.execute( query = "{ whoAmI }", context = { "user" : "rob" } );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.whoAmI ).toBe( "rob asked for whoAmI" );
+				expect( variables.graphQLService.getGeneratedSDL() ).toInclude( "whoAmI: String" );
+			} );
+
+			it( "hands a mutation its input as an instance of the bean, nested beans included", function(){
+				var result = variables.graphQLService.execute(
+					query          = "mutation( $w: WidgetInput! ){ saveWidget( input: $w ) }",
+					queryVariables = { "w" : { "name" : "Nut", "maker" : { "name" : "Bolt Co" }, "tags" : [ "a", "b" ] } }
+				);
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.saveWidget ).toBe( "Widget|Nut|Bolt Co|a,b|no stock" );
+			} );
+
+			it( "names a mutation field after the annotation's value", function(){
+				var result = variables.graphQLService.execute( 'mutation { renameWidget( id: 2, name: "New" ) { id name } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.renameWidget.name ).toBe( "New" );
+			} );
+
+			it( "reports an exception in a service method as an error on that field", function(){
+				var result = variables.graphQLService.execute( 'mutation { renameWidget( id: "x", name: "New" ) { id } }' );
+
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+			} );
+
+			it( "builds services through instanceFactory when one is given", function(){
+				var settings = duplicate( variables.codeOnly );
+				var asked    = [];
+				settings.instanceFactory = ( classPath, meta ) => {
+					arrayAppend( asked, meta.simpleName );
+					var instance = new "../../models/ClassFiles"().instantiate( classPath );
+					if( meta.simpleName == "GreetingService" ){
+						instance.setGreeting( "Howdy" );
+					}
+					return instance;
+				};
+
+				var result = new "../../models/GraphQLService"( settings ).execute( '{ greet( name: "Rob" ) }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.greet ).toBe( "Howdy, Rob" );
+				expect( asked.sort( "text" ) ).toBe( [ "GreetingService", "WidgetService" ] );
+			} );
+
+		} );
+
+		describe( "Generated and hand-written schema together", function(){
+
+			it( "extends a hand-written Query instead of declaring a second one", function(){
+				var result = variables.mixedService.execute( '{ version greet( name: "Rob" ) }' );
+
+				expect( variables.mixedService.getGeneratedSDL() ).toInclude( "extend type Query" );
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.version ).toBe( "1.2.3" );
+				expect( result.data.greet ).toBe( "Hello, Rob" );
+			} );
+
+			it( "lets a hand-written extension and resolver add a field to a generated type", function(){
+				var result = variables.mixedService.execute( "{ widget( id: 7 ) { name slug } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.slug ).toBe( "widget-7" );
+			} );
+
+		} );
+
+		describe( "Code-first configuration errors", function(){
+
+			it( "names the property whose type has no GraphQL equivalent", function(){
+				expect( function(){
+					new "../../models/GraphQLService"( { "modelPaths" : [ variables.root & "/bad/unmappable" ] } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Thing\.extras.*graphqlField" );
+			} );
+
+			it( "names both functions that declare the same field", function(){
+				expect( function(){
+					new "../../models/GraphQLService"( { "servicePaths" : [ variables.root & "/bad/duplicate" ] } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Query\.ping is declared twice.*FirstService\.ping.*SecondService\.other" );
+			} );
+
+			it( "fails when a generated type is also written by hand", function(){
+				expect( function(){
+					new "../../models/GraphQLService"( {
+						"modelPaths"  : [ variables.root & "/models" ],
+						"schemaPaths" : [ variables.root & "/bad/clash" ]
+					} );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Widget" );
+			} );
+
+			it( "fails for a model path that doesn't exist", function(){
+				expect( function(){
+					new "../../models/GraphQLService"( { "modelPaths" : [ variables.root & "/nowhere" ] } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "modelPaths" );
+			} );
+
+			it( "fails when instanceFactory isn't a function", function(){
+				var settings = duplicate( variables.codeOnly );
+				settings.instanceFactory = "nope";
+
+				expect( function(){
+					new "../../models/GraphQLService"( settings );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "instanceFactory" );
+			} );
+
+		} );
+	}
+
+}

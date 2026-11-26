@@ -1,0 +1,61 @@
+class {
+
+	/** One widget by id. */
+	@graphqlQuery
+	Widget function widget( required numeric id graphqlType="ID!" ){
+		return new "../models/Widget"(
+			id           = arguments.id,
+			name         = "Widget #arguments.id#",
+			price        = 9.5,
+			stock        = 3,
+			active       = true,
+			maker        = new "../models/Maker"( name = "Acme" ),
+			tags         = [ new "../models/Tag"( label = "new" ) ],
+			passwordHash = "hunter2",
+			createdAt    = createDateTime( 2026, 1, 31, 9, 30, 0, 0, "UTC" )
+		);
+	}
+
+	@graphqlQuery
+	@graphqlReturns( "[Widget!]!" )
+	array function widgets( numeric limit = 2 ){
+		var found = [];
+		for( var i = 1; i <= arguments.limit; i++ ){
+			arrayAppend( found, widget( i ) );
+		}
+		return found;
+	}
+
+	@graphqlQuery
+	string function whoAmI( struct context, any env ){
+		return arguments.context.user & " asked for " & arguments.env.getField().getName();
+	}
+
+	@graphqlMutation
+	@graphqlReturns( "String!" )
+	string function saveWidget( required Widget input ){
+		return [
+			getMetadata( arguments.input ).name.listLast( "." ),
+			arguments.input.getName(),
+			isNull( arguments.input.getMaker() ) ? "no maker" : arguments.input.getMaker().getName(),
+			arrayToList( arguments.input.getTags() ?: [] ),
+			isNull( arguments.input.getStock() ) ? "no stock" : arguments.input.getStock()
+		].toList( "|" );
+	}
+
+	@graphqlMutation( "renameWidget" )
+	Widget function rename( required numeric id graphqlType="ID!", required string name ){
+		var found = widget( arguments.id );
+		found.setName( arguments.name );
+		return found;
+	}
+
+	string function notExposed(){
+		return "no";
+	}
+
+	private string function helper(){
+		return "no";
+	}
+
+}

@@ -1,0 +1,24 @@
+/** A thing we sell. */
+@graphqlType
+@graphqlInput
+class accessors="true" extends="Timestamped" {
+
+	@graphqlId
+	property name="id" type="numeric";
+
+	/** What it's called on the shelf. */
+	property name="name" type="string" required="true";
+
+	property name="price" type="numeric";
+	property name="stock" type="integer";
+	property name="active" type="boolean";
+	property name="maker" type="Maker";
+
+	@graphqlField( "[Tag!]" )
+	@graphqlInputField( "[String!]" )
+	property name="tags" type="array";
+
+	@graphqlIgnore
+	property name="passwordHash" type="string";
+
+}

@@ -1,0 +1,10 @@
+class accessors="true" {
+
+	property name="greeting" default="Hello";
+
+	@graphqlQuery
+	string function greet( required string name ){
+		return variables.greeting & ", " & arguments.name;
+	}
+
+}
