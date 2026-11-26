@@ -1,0 +1,109 @@
+/**
+ * Custom scalars end-to-end: the module's own DateTime and Long, and one supplied
+ * through settings.scalars. See GraphQLServiceSpec for why paths go through expandPath().
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		variables.settings = {
+			"schemaPaths"         : [ expandPath( "tests/resources/scalars/schema.graphqls" ) ],
+			"resolverBasePackage" : expandPath( "tests/resources/scalars/resolvers" ),
+			"scalars"             : {
+				"Upper" : {
+					"serialize"  : ( value ) => ucase( value ),
+					"parseValue" : ( value ) => {
+						if( !len( value ) ){
+							throw( message = "a word is required" );
+						}
+						return ucase( value );
+					}
+				}
+			}
+		};
+		variables.graphQLService = new "../../models/GraphQLService"( variables.settings );
+	}
+
+	function run(){
+		describe( "Custom scalars", function(){
+
+			it( "writes DateTime as a UTC instant, whatever kind of date the resolver returned", function(){
+				var result = variables.graphQLService.execute( "{ stamp { fromInstant fromBoxLang fromString } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.stamp.fromInstant ).toBe( "2026-01-31T09:30:00Z" );
+				expect( result.data.stamp.fromBoxLang ).toBe( "2026-01-31T09:30:00Z" );
+				expect( result.data.stamp.fromString ).toBe( "2026-01-31T09:30:00Z" );
+			} );
+
+			it( "reports a value that isn't a date as an error on that field, not a failed request", function(){
+				var result = variables.graphQLService.execute( "{ stamp { notADate big } }" );
+
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ] ).toInclude( "DateTime" );
+				expect( isNull( result.data.stamp.notADate ) ).toBeTrue();
+				expect( toString( result.data.stamp.big ) ).toBe( "9007199254740993" );
+			} );
+
+			it( "reads DateTime from a literal and from a variable", function(){
+				var literal  = variables.graphQLService.execute( '{ echoDate( at: "2026-01-31T10:30:00+01:00" ) }' );
+				var variable = variables.graphQLService.execute(
+					query          = "query( $at: DateTime! ){ echoDate( at: $at ) }",
+					queryVariables = { "at" : "2026-01-31T10:30:00+01:00" }
+				);
+
+				expect( literal.errors ).toBeEmpty();
+				expect( literal.data.echoDate ).toBe( "2026-01-31T09:30:00Z" );
+				expect( variable.errors ).toBeEmpty();
+				expect( variable.data.echoDate ).toBe( "2026-01-31T09:30:00Z" );
+			} );
+
+			it( "rejects a DateTime literal or variable that isn't one", function(){
+				var literal  = variables.graphQLService.execute( '{ echoDate( at: "tomorrow" ) }' );
+				var variable = variables.graphQLService.execute(
+					query          = "query( $at: DateTime! ){ echoDate( at: $at ) }",
+					queryVariables = { "at" : "tomorrow" }
+				);
+
+				expect( arrayLen( literal.errors ) ).toBe( 1 );
+				expect( arrayLen( variable.errors ) ).toBe( 1 );
+			} );
+
+			it( "keeps a Long whole beyond 32 bits, from a literal and a variable", function(){
+				var literal  = variables.graphQLService.execute( "{ echoLong( n: 9007199254740993 ) }" );
+				var variable = variables.graphQLService.execute(
+					query          = "query( $n: Long! ){ echoLong( n: $n ) }",
+					queryVariables = { "n" : 5000000000 }
+				);
+				var fraction = variables.graphQLService.execute( "{ echoLong( n: 1.5 ) }" );
+
+				expect( literal.errors ).toBeEmpty();
+				expect( toString( literal.data.echoLong ) ).toBe( "9007199254740993" );
+				expect( variable.errors ).toBeEmpty();
+				expect( toString( variable.data.echoLong ) ).toBe( "5000000000" );
+				expect( arrayLen( fraction.errors ) ).toBe( 1 );
+			} );
+
+			it( "uses the conversions given in settings.scalars", function(){
+				var result  = variables.graphQLService.execute( '{ shout( word: "hey" ) stamp { word } }' );
+				var invalid = variables.graphQLService.execute( '{ shout( word: "" ) }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.shout ).toBe( "HEY" );
+				expect( result.data.stamp.word ).toBe( "QUIET" );
+				expect( arrayLen( invalid.errors ) ).toBe( 1 );
+				expect( invalid.errors[ 1 ] ).toInclude( "a word is required" );
+			} );
+
+			it( "fails at construction when the schema declares a scalar with no conversions", function(){
+				var withoutUpper = duplicate( variables.settings );
+				structDelete( withoutUpper, "scalars" );
+
+				expect( function(){
+					new "../../models/GraphQLService"( withoutUpper );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Upper" );
+			} );
+
+		} );
+	}
+
+}

@@ -1,0 +1,19 @@
+scalar DateTime
+scalar Long
+scalar Upper
+
+type Query {
+	stamp: Stamp
+	echoDate(at: DateTime!): DateTime
+	echoLong(n: Long!): Long
+	shout(word: Upper!): Upper
+}
+
+type Stamp {
+	fromInstant: DateTime
+	fromBoxLang: DateTime
+	fromString: DateTime
+	notADate: DateTime
+	big: Long
+	word: Upper
+}

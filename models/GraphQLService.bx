@@ -106,6 +106,7 @@ class {
 		var mergedRegistry       = parseAndMergeSchemas( schemaFiles );
 		var runtimeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.RuntimeWiring" ).newRuntimeWiring();
 
+		wireScalars( runtimeWiringBuilder, mergedRegistry );
 		wireResolvers( runtimeWiringBuilder, mergedRegistry );
 
 		var runtimeWiring   = runtimeWiringBuilder.build();
@@ -188,6 +189,43 @@ class {
 		}
 
 		return mergedRegistry;
+	}
+
+	/**
+	 * Every scalar the schema declares needs its conversions: from settings.scalars
+	 * first, then the module's own (BuiltInScalars). typeRegistry.scalars() also
+	 * lists the five the GraphQL spec defines, which graphql-java wires itself.
+	 */
+	private void function wireScalars( required any runtimeWiringBuilder, required any typeRegistry ){
+		var configured = variables.settings.scalars ?: {};
+		if( !isStruct( configured ) ){
+			throw( type = "BxGraphQL.ConfigurationException", message = "scalars must be a struct of { ScalarName : { serialize, parseValue } }." );
+		}
+
+		for( var scalarName in arguments.typeRegistry.scalars().keySet().toArray() ){
+			if( arrayContains( [ "Int", "Float", "String", "Boolean", "ID" ], scalarName ) ){
+				continue;
+			}
+			var handlers = configured[ scalarName ] ?: new "BuiltInScalars"().handlersFor( scalarName );
+			if( !isStruct( handlers ) || !isFunctionValue( handlers.serialize ?: "" ) || !isFunctionValue( handlers.parseValue ?: "" ) ){
+				throw(
+					type    = "BxGraphQL.ConfigurationException",
+					message = "The schema declares scalar #scalarName#, which needs settings.scalars.#scalarName# = { serialize, parseValue } (functions taking the one value)."
+				);
+			}
+
+			var coercing = createDynamicProxy(
+				new "ScalarCoercing"( scalarName = scalarName, handlers = handlers, javaClass = variables.javaClass ),
+				"graphql.schema.Coercing"
+			);
+			arguments.runtimeWiringBuilder.scalar(
+				variables.javaClass.create( "graphql.schema.GraphQLScalarType" ).newScalar().name( scalarName ).coercing( coercing ).build()
+			);
+		}
+	}
+
+	private boolean function isFunctionValue( any value ){
+		return isCustomFunction( arguments.value ) || isClosure( arguments.value );
 	}
 
 	private void function wireResolvers( required any runtimeWiringBuilder, required any typeRegistry ){

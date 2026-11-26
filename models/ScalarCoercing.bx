@@ -1,0 +1,65 @@
+/**
+ * One custom scalar's conversions, wrapped as a graphql.schema.Coercing via
+ * createDynamicProxy. `handlers` is { serialize, parseValue, parseLiteral? } of
+ * closures taking the one value; parseLiteral defaults to parseValue, given the
+ * literal as a plain value.
+ *
+ * Whatever a handler throws is rethrown as graphql-java's own Coercing*Exception:
+ * that is what turns bad input into an entry in errors[] instead of a failed request.
+ */
+class {
+
+	variables.scalarName = "";
+	variables.handlers   = {};
+	variables.javaClass  = "";
+
+	function init( required string scalarName, required struct handlers, required any javaClass ){
+		variables.scalarName = arguments.scalarName;
+		variables.handlers   = arguments.handlers;
+		variables.javaClass  = arguments.javaClass;
+		return this;
+	}
+
+	any function serialize( any dataFetcherResult ){
+		return convert( variables.handlers.serialize, arguments.dataFetcherResult, "graphql.schema.CoercingSerializeException" );
+	}
+
+	any function parseValue( any input ){
+		return convert( variables.handlers.parseValue, arguments.input, "graphql.schema.CoercingParseValueException" );
+	}
+
+	any function parseLiteral( any input ){
+		return convert(
+			variables.handlers.parseLiteral ?: variables.handlers.parseValue,
+			plainValueOf( arguments.input ),
+			"graphql.schema.CoercingParseLiteralException"
+		);
+	}
+
+	private any function convert( required any handler, any value, required string exceptionClass ){
+		try {
+			return arguments.handler( arguments.value ?: javaCast( "null", "" ) );
+		} catch( any e ){
+			throw( object = variables.javaClass.create( arguments.exceptionClass ).init( "#variables.scalarName#: #e.message#" ) );
+		}
+	}
+
+	private any function plainValueOf( any literal ){
+		if( isNull( arguments.literal ) || isInstanceOf( arguments.literal, "graphql.language.NullValue" ) ){
+			return javaCast( "null", "" );
+		}
+		if( isInstanceOf( arguments.literal, "graphql.language.BooleanValue" ) ){
+			return arguments.literal.isValue();
+		}
+		if( isInstanceOf( arguments.literal, "graphql.language.StringValue" )
+			|| isInstanceOf( arguments.literal, "graphql.language.IntValue" )
+			|| isInstanceOf( arguments.literal, "graphql.language.FloatValue" ) ){
+			return arguments.literal.getValue();
+		}
+		if( isInstanceOf( arguments.literal, "graphql.language.EnumValue" ) ){
+			return arguments.literal.getName();
+		}
+		throw( message = "a list or object literal isn't supported; pass it as a variable" );
+	}
+
+}

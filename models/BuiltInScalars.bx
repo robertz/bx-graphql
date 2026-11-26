@@ -1,0 +1,55 @@
+/**
+ * Scalars the module supplies when a schema declares them and settings.scalars
+ * doesn't: DateTime (an ISO-8601 instant, always written in UTC) and Long.
+ */
+class {
+
+	static struct function handlersFor( required string scalarName ){
+		switch( arguments.scalarName ){
+			case "DateTime":
+				return {
+					"serialize"  : ( value ) => BuiltInScalars::instantOf( value ).toString(),
+					"parseValue" : ( value ) => BuiltInScalars::instantOf( value ).toString()
+				};
+			case "Long":
+				return {
+					"serialize"  : ( value ) => BuiltInScalars::longOf( value ),
+					"parseValue" : ( value ) => BuiltInScalars::longOf( value )
+				};
+		}
+		return {};
+	}
+
+	static any function instantOf( any value ){
+		if( isNull( arguments.value ) ){
+			throw( message = "expected a date, got null" );
+		}
+		if( isInstanceOf( arguments.value, "java.time.Instant" ) ){
+			return arguments.value;
+		}
+		if( isInstanceOf( arguments.value, "java.util.Date" ) || isInstanceOf( arguments.value, "java.time.OffsetDateTime" )
+			|| isInstanceOf( arguments.value, "java.time.ZonedDateTime" ) || isInstanceOf( arguments.value, "ortus.boxlang.runtime.types.DateTime" ) ){
+			return arguments.value.toInstant();
+		}
+		if( isInstanceOf( arguments.value, "java.lang.CharSequence" ) ){
+			try {
+				return createObject( "java", "java.time.OffsetDateTime" ).parse( trim( arguments.value ) ).toInstant();
+			} catch( any e ){
+				throw( message = "'#arguments.value#' isn't an ISO-8601 date and time with an offset, such as 2026-01-31T09:30:00Z" );
+			}
+		}
+		throw( message = "can't read a date from a #arguments.value.getClass().getSimpleName()#" );
+	}
+
+	static any function longOf( any value ){
+		if( isNull( arguments.value ) ){
+			throw( message = "expected a whole number, got null" );
+		}
+		try {
+			return createObject( "java", "java.math.BigDecimal" ).init( trim( toString( arguments.value ) ) ).longValueExact();
+		} catch( any e ){
+			throw( message = "'#toString( arguments.value )#' isn't a whole number that fits in 64 bits" );
+		}
+	}
+
+}

@@ -1,0 +1,26 @@
+class {
+
+	any function stamp(){
+		return {
+			"fromInstant" : createObject( "java", "java.time.Instant" ).parse( "2026-01-31T09:30:00Z" ),
+			"fromBoxLang" : createDateTime( 2026, 1, 31, 9, 30, 0, 0, "UTC" ),
+			"fromString"  : "2026-01-31T10:30:00+01:00",
+			"notADate"    : "yesterday",
+			"big"         : "9007199254740993",
+			"word"        : "quiet"
+		};
+	}
+
+	any function echoDate( any source, required struct args ){
+		return arguments.args.at;
+	}
+
+	any function echoLong( any source, required struct args ){
+		return arguments.args.n;
+	}
+
+	any function shout( any source, required struct args ){
+		return arguments.args.word;
+	}
+
+}
