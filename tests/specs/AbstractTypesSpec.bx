@@ -1,0 +1,61 @@
+/**
+ * Interfaces and unions: hand-written in SDL, implemented by generated and hand-written
+ * types, with the concrete type worked out per value. See GraphQLServiceSpec for why
+ * paths go through expandPath().
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		var root = expandPath( "tests/resources/abstract" );
+		variables.graphQLService = new "../../models/GraphQLService"( {
+			"schemaPaths"         : [ root & "/schema" ],
+			"modelPaths"          : [ root & "/models" ],
+			"servicePaths"        : [ root & "/services" ],
+			"resolverBasePackage" : root & "/resolvers"
+		} );
+	}
+
+	function run(){
+		describe( "Interfaces and unions", function(){
+
+			it( "resolves a union member from a bean's class, a renamed type included, and from __typename", function(){
+				var result = variables.graphQLService.execute(
+					"{ search { __typename ... on Book { pages } ... on Film { stars } ... on Song { seconds } } }"
+				);
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.search.map( ( found ) => found.__typename ) ).toBe( [ "Book", "Film", "Song" ] );
+				expect( result.data.search[ 1 ].pages ).toBe( 600 );
+				expect( result.data.search[ 2 ].stars ).toBe( 5 );
+				expect( result.data.search[ 3 ].seconds ).toBe( 140 );
+			} );
+
+			it( "generates `implements` and reads the interface's fields off each type", function(){
+				var result = variables.graphQLService.execute( "{ everything { name } }" );
+
+				expect( variables.graphQLService.getGeneratedSDL() ).toInclude( "type Book implements Named {" );
+				expect( variables.graphQLService.getGeneratedSDL() ).toInclude( "type Film implements Named & Rated {" );
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.everything.map( ( named ) => named.name ) ).toBe( [ "Dune", "Alien", "Help" ] );
+			} );
+
+			it( "asks {Interface}Resolver.resolveType() when there is one, and reports a type it can't place", function(){
+				var result = variables.graphQLService.execute( "{ rated { __typename stars } }" );
+
+				expect( result.data.rated[ 1 ].__typename ).toBe( "Film" );
+				expect( result.data.rated[ 1 ].stars ).toBe( 3 );
+				expect( isNull( result.data.rated[ 2 ] ) ).toBeTrue();
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+			} );
+
+			it( "reports a struct with no __typename as an error on that field", function(){
+				var result = variables.graphQLService.execute( "{ untyped { name } }" );
+
+				expect( isNull( result.data.untyped ) ).toBeTrue();
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+			} );
+
+		} );
+	}
+
+}

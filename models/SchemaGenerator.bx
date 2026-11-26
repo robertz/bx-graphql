@@ -4,8 +4,9 @@
  *
  *   modelPaths   — a class marked @graphqlType and/or @graphqlInput becomes a type and/or
  *                  an input, a field per property, plus a field per function marked
- *                  @graphqlField (on the type only). One marked @graphqlEnum( "A,B" )
- *                  becomes an enum.
+ *                  @graphqlField (on the type only); @graphqlImplements( "Node" ) names
+ *                  hand-written interfaces the type implements. One marked
+ *                  @graphqlEnum( "A,B" ) becomes an enum.
  *   servicePaths — public functions marked @graphqlQuery or @graphqlMutation become
  *                  fields of Query or Mutation.
  *
@@ -233,7 +234,9 @@ class {
 				message = "#meta.name# would make #arguments.keyword# #arguments.name# with no fields."
 			);
 		}
-		return description( meta.documentation.hint ?: "", "" ) & "#arguments.keyword# #arguments.name# {" & char( 10 ) & arrayToList( lines, char( 10 ) ) & char( 10 ) & "}";
+		var implemented = arguments.forInput ? [] : listToArray( meta.annotations.graphqlImplements ?: "", ", &" );
+		return description( meta.documentation.hint ?: "", "" ) & "#arguments.keyword# #arguments.name#"
+			& ( arrayLen( implemented ) ? " implements " & arrayToList( implemented, " & " ) : "" ) & " {" & char( 10 ) & arrayToList( lines, char( 10 ) ) & char( 10 ) & "}";
 	}
 
 	/**

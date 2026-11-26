@@ -29,9 +29,11 @@ class {
 	}
 
 	any function parseLiteral( any input ){
+		var handler = variables.handlers.parseLiteral ?: variables.handlers.parseValue;
+		// plainValueOf() inside convert(), so a literal it refuses is an entry in errors[] too
 		return convert(
-			variables.handlers.parseLiteral ?: variables.handlers.parseValue,
-			plainValueOf( arguments.input ),
+			( literal ) => handler( plainValueOf( literal ?: javaCast( "null", "" ) ) ?: javaCast( "null", "" ) ),
+			arguments.input,
 			"graphql.schema.CoercingParseLiteralException"
 		);
 	}

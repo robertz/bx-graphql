@@ -4,7 +4,7 @@
  * convention-based DataFetchers. Built once at construction time — not per request.
  * No WireBox; settings are passed directly to init().
  *
- * Deferred: interface/union TypeResolver wiring, introspection toggle.
+ * Deferred: introspection toggle.
  */
 class {
 
@@ -411,12 +411,29 @@ class {
 		var instances           = {};
 		var hasAuthorizer       = isFunctionValue( variables.settings.authorizer ?: "" );
 
+		var typeNamesByClass    = {};
+		for( var simpleName in arguments.generated.models ){
+			if( len( arguments.generated.models[ simpleName ].typeName ) ){
+				typeNamesByClass[ simpleName ] = arguments.generated.models[ simpleName ].typeName;
+			}
+		}
+
 		while( entryIterator.hasNext() ){
-			var entry = entryIterator.next();
+			var entry    = entryIterator.next();
+			var typeName = entry.getKey();
+			if( isInstanceOf( entry.getValue(), "graphql.language.InterfaceTypeDefinition" ) || isInstanceOf( entry.getValue(), "graphql.language.UnionTypeDefinition" ) ){
+				var typeResolver = new "TypeResolverAdapter"( typeName, resolverBasePackage, variables.classFiles, typeNamesByClass );
+				arguments.runtimeWiringBuilder.type(
+					variables.javaClass.create( "graphql.schema.idl.TypeRuntimeWiring" )
+						.newTypeWiring( typeName )
+						.typeResolver( createDynamicProxy( typeResolver, "graphql.schema.TypeResolver" ) )
+						.build()
+				);
+				continue;
+			}
 			if( !isInstanceOf( entry.getValue(), "graphql.language.ObjectTypeDefinition" ) ){
 				continue;
 			}
-			var typeName = entry.getKey();
 
 			var adapter = new "DataFetcherAdapter"(
 				typeName            = typeName,

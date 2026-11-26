@@ -1,7 +1,7 @@
 # Code-first schema: plan
 
-Status: phases 1 to 5 and the README are done on `code-first-schema`. Left:
-the version bump to 0.2.0 and the release. Where the build differs from this
+Status: phases 1 to 5, the README, and the follow-up work listed at the end
+are done on `code-first-schema`. Left: the version bump to 0.2.0 and the release. Where the build differs from this
 plan, the README is right; the differences are listed at the end.
 
 Generate SDL and wire resolvers from annotated BoxLang classes, alongside the
@@ -184,10 +184,8 @@ Each phase is its own commit with specs, and leaves the suite green.
 - `ModuleConfig.bx` and `box.json` to 0.2.0.
 
 ## Out of scope
-- Interface / union `TypeResolver` wiring, enums from classes.
-- Structured errors (`{ message, path }` instead of message strings). Worth
-  doing next: the reader parses the strings back apart in `GraphQLRoutes.errorOf`.
-- DataLoader batching for bean relations.
+- Operations (CRUD) generated from a bean alone; subscriptions.
+- Interfaces and unions generated from classes (they are written in SDL).
 
 ## Where the build differs from the plan
 - `@graphqlInputField( "…" )` was added: `@graphqlField` is verbatim, so a
@@ -203,3 +201,23 @@ Each phase is its own commit with specs, and leaves the suite green.
 - Phase 3's helper is `ClassFiles.bx`; phases 3 to 5 landed as one commit.
 - A `{Type}Resolver.bx` method for a generated operation's field is not an
   error: the generated method wins.
+
+## Added after the plan
+What a review of the first build found missing, all now in the README:
+- Enums (`@graphqlEnum`), bean functions as fields (`@graphqlField` on a
+  function), `@graphqlWriteOnly`, `@graphqlImplements`.
+- Interface and union type resolution (`TypeResolverAdapter`).
+- Annotated functions inherited from a parent service.
+- Argument descriptions, plain default values in the SDL, deprecation.
+- Lists of input beans; null set as null; `args` injected to tell null from
+  left out.
+- `@graphqlRequires` with `settings.authorizer`.
+- `settings.structuredErrors` and `settings.onError`.
+- `settings.loaders` (DataLoader batching).
+- `instanceFactory` builds resolvers and input beans too, told which by `kind`.
+
+Not done, and why:
+- BoxLang versions before 1.19.0 and Windows paths are untested; there was
+  nowhere to run them.
+- Two annotated classes with the same simple name still can't coexist:
+  BoxLang type names (`type="Item"`) are how a type is referred to.

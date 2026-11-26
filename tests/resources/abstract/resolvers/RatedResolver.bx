@@ -1,0 +1,7 @@
+class {
+
+	string function resolveType( any value ){
+		return arguments.value.kind == "film" ? "Film" : "Nothing";
+	}
+
+}

@@ -1,0 +1,14 @@
+interface Named {
+	name: String
+}
+
+union Found = Book | Film | Song
+
+type Song implements Named {
+	name: String
+	seconds: Int
+}
+
+interface Rated {
+	stars: Int
+}

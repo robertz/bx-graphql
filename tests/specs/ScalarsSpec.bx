@@ -94,6 +94,20 @@ class extends="testbox.system.BaseSpec" {
 				expect( invalid.errors[ 1 ] ).toInclude( "a word is required" );
 			} );
 
+			it( "prefers parseLiteral for a value written in the query, and refuses a list literal", function(){
+				var settings = duplicate( variables.settings );
+				settings.scalars.Upper.parseLiteral = ( value ) => "literal " & value;
+				var service = new "../../models/GraphQLService"( settings );
+
+				var literal  = service.execute( '{ shout( word: "hey" ) }' );
+				var variable = service.execute( query = "query( $w: Upper! ){ shout( word: $w ) }", queryVariables = { "w" : "hey" } );
+				var list     = service.execute( '{ shout( word: [ "a" ] ) }' );
+
+				expect( literal.data.shout ).toBe( "LITERAL HEY" );
+				expect( variable.data.shout ).toBe( "HEY" );
+				expect( arrayLen( list.errors ) ).toBe( 1 );
+			} );
+
 			it( "fails at construction when the schema declares a scalar with no conversions", function(){
 				var withoutUpper = duplicate( variables.settings );
 				structDelete( withoutUpper, "scalars" );

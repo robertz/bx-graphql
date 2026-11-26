@@ -1,0 +1,31 @@
+class {
+
+	@graphqlQuery
+	@graphqlReturns( "[Found!]!" )
+	array function search(){
+		return [
+			new "../models/Book"( name = "Dune", pages = 600 ),
+			new "../models/Movie"( name = "Alien", stars = 5 ),
+			{ "__typename" : "Song", "name" : "Help", "seconds" : 140 }
+		];
+	}
+
+	@graphqlQuery
+	@graphqlReturns( "[Named!]!" )
+	array function everything(){
+		return search();
+	}
+
+	@graphqlQuery
+	@graphqlReturns( "[Rated]!" )
+	array function rated(){
+		return [ { "stars" : 3, "kind" : "film" }, { "stars" : 1, "kind" : "mystery" } ];
+	}
+
+	@graphqlQuery
+	@graphqlReturns( "Named" )
+	struct function untyped(){
+		return { "name" : "?" };
+	}
+
+}

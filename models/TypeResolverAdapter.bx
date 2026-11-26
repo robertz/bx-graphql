@@ -1,0 +1,72 @@
+/**
+ * Decides which object type a value is, for a field typed as an interface or a union.
+ * Wrapped as a graphql.schema.TypeResolver via createDynamicProxy. In order:
+ *
+ *   1. {resolverBasePackage}/{InterfaceOrUnion}Resolver.bx's resolveType( value, context, env ),
+ *      when that file has one: it returns the type's name.
+ *   2. A struct's __typename key.
+ *   3. A class instance's class: the type generated from it, else its simple name.
+ *
+ * A name that isn't an object type in the schema resolves to nothing, which
+ * graphql-java reports as an error on the field.
+ */
+class {
+
+	variables.abstractName        = "";
+	variables.resolverBasePackage = "";
+	variables.classFiles          = "";
+	variables.typeNamesByClass    = {};
+	variables.resolverInstance    = "";
+	variables.resolverChecked     = false;
+
+	/** @typeNamesByClass { ClassSimpleName : GraphQL type name } for the generated types. */
+	function init( required string abstractName, required string resolverBasePackage, required any classFiles, required struct typeNamesByClass ){
+		variables.abstractName        = arguments.abstractName;
+		variables.resolverBasePackage = arguments.resolverBasePackage;
+		variables.classFiles          = arguments.classFiles;
+		variables.typeNamesByClass    = arguments.typeNamesByClass;
+		return this;
+	}
+
+	any function getType( required any environment ){
+		var value    = arguments.environment.getObject();
+		var typeName = nameFor( value, arguments.environment );
+		if( !len( typeName ) ){
+			return javaCast( "null", "" );
+		}
+		return arguments.environment.getSchema().getObjectType( typeName );
+	}
+
+	private string function nameFor( any value, required any environment ){
+		var custom = customResolver();
+		if( !isSimpleValue( custom ) ){
+			return custom.resolveType( value = arguments.value, context = arguments.environment.getContext(), env = arguments.environment ) ?: "";
+		}
+		if( isNull( arguments.value ) ){
+			return "";
+		}
+		if( isInstanceOf( arguments.value, "ortus.boxlang.runtime.runnables.IClassRunnable" ) ){
+			var simpleName = listLast( getClassMetadata( arguments.value ).name, "." );
+			return variables.typeNamesByClass[ simpleName ] ?: simpleName;
+		}
+		if( isStruct( arguments.value ) ){
+			return arguments.value.__typename ?: "";
+		}
+		return "";
+	}
+
+	private any function customResolver(){
+		if( !variables.resolverChecked ){
+			variables.resolverChecked = true;
+			var resolverPath = variables.resolverBasePackage & "/" & variables.abstractName & "Resolver";
+			if( len( variables.resolverBasePackage ) && fileExists( resolverPath & ".bx" ) ){
+				var candidate = variables.classFiles.build( resolverPath, "resolver" );
+				if( structKeyExists( candidate, "resolveType" ) ){
+					variables.resolverInstance = candidate;
+				}
+			}
+		}
+		return variables.resolverInstance;
+	}
+
+}

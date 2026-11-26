@@ -1,0 +1,8 @@
+@graphqlType( "Film" )
+@graphqlImplements( "Named, Rated" )
+class accessors="true" {
+
+	property name="name" type="string";
+	property name="stars" type="integer";
+
+}
