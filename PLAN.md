@@ -1,12 +1,7 @@
 # Code-first schema: plan
 
-Status: phases 1 to 5, the README, and the follow-up work listed at the end
-are done on `code-first-schema`. Left: the version bump to 0.2.0 and the release. Where the build differs from this
-plan, the README is right; the differences are listed at the end.
-
-Generate SDL and wire resolvers from annotated BoxLang classes, alongside the
-hand-written `.graphqls` + `{Type}Resolver.bx` convention that exists today.
-Target version: 0.2.0. Nothing that works in 0.1.1 changes behaviour.
+Status: done and released as 0.2.0. Where the build differs from this plan,
+the README is right; the differences are listed at the end.
 
 ## Shape of the feature
 
