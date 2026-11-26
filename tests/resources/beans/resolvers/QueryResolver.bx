@@ -1,0 +1,17 @@
+class {
+
+	any function gadget(){
+		return new Gadget(
+			id     = 5,
+			name   = "Sprocket",
+			active = false,
+			maker  = new Maker( name = "Acme" ),
+			parts  = [ { "sku" : "A1" }, { "sku" : "B2" } ]
+		);
+	}
+
+	any function gadgets(){
+		return [ new Gadget( id = 1, name = "One" ), new Gadget( id = 2, name = "Two" ) ];
+	}
+
+}

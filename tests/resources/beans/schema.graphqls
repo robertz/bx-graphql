@@ -1,0 +1,24 @@
+type Query {
+	gadget: Gadget
+	gadgets: [Gadget!]!
+}
+
+type Gadget {
+	id: ID!
+	name: String
+	active: Boolean
+	label: String
+	stock: Int
+	missing: String
+	shout: String
+	maker: Maker
+	parts: [Part!]
+}
+
+type Maker {
+	name: String
+}
+
+type Part {
+	sku: String
+}

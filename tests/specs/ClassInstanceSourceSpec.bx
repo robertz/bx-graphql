@@ -1,0 +1,62 @@
+/**
+ * Resolvers that return class instances rather than structs: fields are read through
+ * getters and public members. See GraphQLServiceSpec for why paths go through expandPath().
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		variables.graphQLService = new "../../models/GraphQLService"( {
+			"schemaPaths"         : [ expandPath( "tests/resources/beans/schema.graphqls" ) ],
+			"resolverBasePackage" : expandPath( "tests/resources/beans/resolvers" )
+		} );
+	}
+
+	function run(){
+		describe( "A class instance as a field's source", function(){
+
+			it( "reads fields through the getters accessors generate, false included", function(){
+				var result = variables.graphQLService.execute( "{ gadget { id name active } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.gadget.id ).toBe( "5" );
+				expect( result.data.gadget.name ).toBe( "Sprocket" );
+				expect( result.data.gadget.active ).toBeFalse();
+			} );
+
+			it( "reads a hand-written getter and a public member, and gives null for neither", function(){
+				var result = variables.graphQLService.execute( "{ gadget { label stock missing } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.gadget.label ).toBe( "Sprocket ##5" );
+				expect( result.data.gadget.stock ).toBe( 7 );
+				expect( isNull( result.data.gadget.missing ) ).toBeTrue();
+			} );
+
+			it( "still prefers the type's resolver method", function(){
+				var result = variables.graphQLService.execute( "{ gadget { shout } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.gadget.shout ).toBe( "SPROCKET" );
+			} );
+
+			it( "follows a nested instance, and structs inside an instance", function(){
+				var result = variables.graphQLService.execute( "{ gadget { maker { name } parts { sku } } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.gadget.maker.name ).toBe( "Acme" );
+				expect( result.data.gadget.parts[ 2 ].sku ).toBe( "B2" );
+			} );
+
+			it( "reads each instance in a list", function(){
+				var result = variables.graphQLService.execute( "{ gadgets { id name maker { name } } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.gadgets[ 1 ].name ).toBe( "One" );
+				expect( result.data.gadgets[ 2 ].id ).toBe( "2" );
+				expect( isNull( result.data.gadgets[ 2 ].maker ) ).toBeTrue();
+			} );
+
+		} );
+	}
+
+}

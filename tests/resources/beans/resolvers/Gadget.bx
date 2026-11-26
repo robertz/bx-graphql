@@ -1,0 +1,15 @@
+class accessors="true" {
+
+	property name="id";
+	property name="name";
+	property name="active" type="boolean";
+	property name="maker";
+	property name="parts" type="array";
+
+	this.stock = 7;
+
+	string function getLabel(){
+		return variables.name & " ##" & variables.id;
+	}
+
+}

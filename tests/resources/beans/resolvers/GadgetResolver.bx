@@ -1,0 +1,7 @@
+class {
+
+	string function shout( required any source ){
+		return ucase( arguments.source.getName() );
+	}
+
+}
