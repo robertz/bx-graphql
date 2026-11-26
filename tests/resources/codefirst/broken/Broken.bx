@@ -1,0 +1,12 @@
+class {
+
+	function init(){
+		throw( type = "Shop.NoDatasource", message = "Datasource shop not found" );
+	}
+
+	@graphqlQuery
+	string function anything(){
+		return "";
+	}
+
+}

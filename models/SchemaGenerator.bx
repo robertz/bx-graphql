@@ -49,10 +49,10 @@ class {
 				arrayAppend( blocks, description( model.meta.documentation.hint ?: "", "" ) & "enum #model.enumName# {" & char( 10 ) & char( 9 ) & arrayToList( model.enumValues, char( 10 ) & char( 9 ) ) & char( 10 ) & "}" );
 			}
 			if( len( model.typeName ) ){
-				arrayAppend( blocks, beanBlock( "type", model.typeName, model, mapper, false, operations, typeTexts ) );
+				arrayAppend( blocks, beanBlock( "type", model.typeName, model, mapper, false, operations, typeTexts, models ) );
 			}
 			if( len( model.inputName ) ){
-				arrayAppend( blocks, beanBlock( "input", model.inputName, model, mapper, true, operations, typeTexts ) );
+				arrayAppend( blocks, beanBlock( "input", model.inputName, model, mapper, true, operations, typeTexts, models ) );
 			}
 		}
 
@@ -121,10 +121,15 @@ class {
 		return values;
 	}
 
+	/**
+	 * A field may be claimed by more than one scanned class: a parent and the children
+	 * that inherit its function, or that override it with the annotation repeated. It
+	 * goes to the most-derived of them, so the child's instance is the one called. Two
+	 * claimants where neither descends from the other is an error.
+	 */
 	private array function operationsIn( required array servicePaths ){
-		var operations = [];
-		var claimed    = {};
-		var claimedBy  = {};
+		var claims   = {};
+		var claimOrder = [];
 		for( var classPath in variables.classFiles.under( arguments.servicePaths, "servicePaths" ) ){
 			var meta = variables.classFiles.metadataOf( classPath );
 			for( var fn in variables.classFiles.functionsOf( meta ) ){
@@ -138,29 +143,56 @@ class {
 					}
 					var fieldName = len( fn.annotations[ "graphql" & rootType ] ) ? fn.annotations[ "graphql" & rootType ] : fn.name;
 					var claimKey  = rootType & "." & fieldName;
-					// a parent service in the same folder and its child both list the parent's function: one field
-					if( structKeyExists( claimed, claimKey ) && claimedBy[ claimKey ] == fn.declaredIn & "." & fn.name ){
-						continue;
+					if( !structKeyExists( claims, claimKey ) ){
+						claims[ claimKey ] = [];
+						arrayAppend( claimOrder, claimKey );
 					}
-					if( structKeyExists( claimed, claimKey ) ){
-						throw(
-							type    = "BxGraphQL.ConfigurationException",
-							message = "#rootType#.#fieldName# is declared twice: by #claimed[ claimKey ]# and #where#."
-						);
-					}
-					claimed[ claimKey ]   = where;
-					claimedBy[ claimKey ] = fn.declaredIn & "." & fn.name;
-					arrayAppend( operations, operationOf( rootType, fieldName, classPath, fn, meta, where ) );
+					arrayAppend( claims[ claimKey ], {
+						"className" : meta.name,
+						"ancestors" : ancestorNamesOf( meta ),
+						"operation" : operationOf( rootType, fieldName, classPath, fn, meta, where )
+					} );
 				}
 			}
 		}
-		return operations;
+
+		return claimOrder.map( ( claimKey ) => {
+			var claimants = claims[ claimKey ];
+			for( var candidate in claimants ){
+				var others = claimants.filter( ( other ) => other.className != candidate.className );
+				if( others.every( ( other ) => arrayContains( candidate.ancestors, other.className ) ) ){
+					return candidate.operation;
+				}
+			}
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "#claimKey# is declared twice: by #claimants[ 1 ].operation.where# and #claimants[ 2 ].operation.where#."
+			);
+		} );
 	}
 
-	/** @graphqlRequires on the function, else on its class: the function's wins, even when empty. */
+	private array function ancestorNamesOf( required struct meta ){
+		var names  = [];
+		var parent = arguments.meta.extends ?: {};
+		while( !structIsEmpty( parent ) ){
+			arrayAppend( names, parent.name );
+			parent = parent.extends ?: {};
+		}
+		return names;
+	}
+
+	/**
+	 * BoxLang doesn't hand a class's annotations down to its children, so the class-level
+	 * @graphqlRequires is looked for on the scanned class and then up through its
+	 * parents: the nearest one applies. The function's own always wins, even when empty.
+	 */
 	private struct function operationOf( required string rootType, required string fieldName, required string classPath, required struct fn, required struct classMeta, required string where ){
 		var onFunction = structKeyExists( arguments.fn.annotations, "graphqlRequires" );
-		var onClass    = structKeyExists( arguments.classMeta.annotations, "graphqlRequires" );
+		var guardClass = arguments.classMeta;
+		while( !structIsEmpty( guardClass ) && !structKeyExists( guardClass.annotations ?: {}, "graphqlRequires" ) ){
+			guardClass = guardClass.extends ?: {};
+		}
+		var onClass = !structIsEmpty( guardClass );
 		return {
 			"rootType"    : arguments.rootType,
 			"fieldName"   : arguments.fieldName,
@@ -170,7 +202,7 @@ class {
 			"meta"        : arguments.fn,
 			"where"       : arguments.where,
 			"guarded"     : onFunction || onClass,
-			"requirement" : onFunction ? arguments.fn.annotations.graphqlRequires : ( onClass ? arguments.classMeta.annotations.graphqlRequires : "" )
+			"requirement" : onFunction ? arguments.fn.annotations.graphqlRequires : ( onClass ? guardClass.annotations.graphqlRequires : "" )
 		};
 	}
 
@@ -181,7 +213,8 @@ class {
 		required any mapper,
 		required boolean forInput,
 		required array operations,
-		required array typeTexts
+		required array typeTexts,
+		required struct models
 	){
 		var lines = [];
 		var meta  = arguments.model.meta;
@@ -223,7 +256,7 @@ class {
 				if( fn.access != "public" ){
 					throw( type = "BxGraphQL.ConfigurationException", message = "#fnWhere# is marked @graphqlField but isn't public." );
 				}
-				arrayAppend( lines, fieldLine( fn, fn.name, fnWhere, arguments.mapper, fn.annotations.graphqlField, arguments.typeTexts, {} ) );
+				arrayAppend( lines, fieldLine( fn, fn.name, fnWhere, arguments.mapper, fn.annotations.graphqlField, arguments.typeTexts, arguments.models ) );
 				arrayAppend( arguments.operations, operationOf( arguments.name, fn.name, "", fn, meta, fnWhere ) );
 			}
 		}
@@ -332,11 +365,20 @@ class {
 		return len( reason ) ? " @deprecated( reason: #JSONSerialize( reason )# )" : " @deprecated";
 	}
 
+	/**
+	 * A block string. A `"""` inside is escaped; text ending in a quote or a backslash
+	 * gets a space after it, or it would run into the closing delimiter (`"hi""""`
+	 * closes one character early, and `\"""` reads as an escaped delimiter).
+	 */
 	private string function description( required string text, required string indent ){
-		if( !len( trim( arguments.text ) ) ){
+		var body = replace( trim( arguments.text ), '"""', '\"""', "all" );
+		if( !len( body ) ){
 			return "";
 		}
-		return arguments.indent & '"""' & replace( trim( arguments.text ), '"""', '\"""', "all" ) & '"""' & char( 10 );
+		if( right( body, 1 ) == '"' || right( body, 1 ) == "\" ){
+			body &= " ";
+		}
+		return arguments.indent & '"""' & body & '"""' & char( 10 );
 	}
 
 }

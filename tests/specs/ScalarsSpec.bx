@@ -9,6 +9,10 @@ class extends="testbox.system.BaseSpec" {
 			"schemaPaths"         : [ expandPath( "tests/resources/scalars/schema.graphqls" ) ],
 			"resolverBasePackage" : expandPath( "tests/resources/scalars/resolvers" ),
 			"scalars"             : {
+				"Day" : {
+					"serialize"  : ( value ) => toString( value ),
+					"parseValue" : ( value ) => createObject( "java", "java.time.LocalDate" ).parse( value )
+				},
 				"Upper" : {
 					"serialize"  : ( value ) => ucase( value ),
 					"parseValue" : ( value ) => {
@@ -108,9 +112,22 @@ class extends="testbox.system.BaseSpec" {
 				expect( arrayLen( list.errors ) ).toBe( 1 );
 			} );
 
+			it( "hands a resolver what parseValue returned, not a copy flattened through JSON", function(){
+				var literal  = variables.graphQLService.execute( '{ dayClass( day: "2026-01-31" ) }' );
+				var nested   = variables.graphQLService.execute(
+					query          = "query( $f: DayFilter ){ wordClass( word: ""x"", filter: $f ) }",
+					queryVariables = { "f" : { "days" : [ "2026-01-31", "2026-02-01" ] } }
+				);
+
+				expect( literal.errors ).toBeEmpty();
+				expect( literal.data.dayClass ).toBe( "java.time.LocalDate SATURDAY" );
+				expect( nested.errors ).toBeEmpty();
+				expect( nested.data.wordClass ).toBe( "LocalDate,LocalDate" );
+			} );
+
 			it( "fails at construction when the schema declares a scalar with no conversions", function(){
 				var withoutUpper = duplicate( variables.settings );
-				structDelete( withoutUpper, "scalars" );
+				structDelete( withoutUpper.scalars, "Upper" );
 
 				expect( function(){
 					new "../../models/GraphQLService"( withoutUpper );

@@ -1,12 +1,19 @@
 scalar DateTime
 scalar Long
 scalar Upper
+scalar Day
 
 type Query {
 	stamp: Stamp
 	echoDate(at: DateTime!): DateTime
 	echoLong(n: Long!): Long
 	shout(word: Upper!): Upper
+	dayClass(day: Day!): String
+	wordClass(word: Upper!, filter: DayFilter): String
+}
+
+input DayFilter {
+	days: [Day!]!
 }
 
 type Stamp {

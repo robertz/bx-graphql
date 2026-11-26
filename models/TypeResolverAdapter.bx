@@ -18,6 +18,7 @@ class {
 	variables.typeNamesByClass    = {};
 	variables.resolverInstance    = "";
 	variables.resolverChecked     = false;
+	variables.lockName            = "bxgraphql-type-resolver-" & createUUID();
 
 	/** @typeNamesByClass { ClassSimpleName : GraphQL type name } for the generated types. */
 	function init( required string abstractName, required string resolverBasePackage, required any classFiles, required struct typeNamesByClass ){
@@ -55,15 +56,21 @@ class {
 		return "";
 	}
 
+	/** Built once, under a lock, with resolverChecked set last: see DataFetcherAdapter.ensureResolverResolved(). */
 	private any function customResolver(){
-		if( !variables.resolverChecked ){
-			variables.resolverChecked = true;
-			var resolverPath = variables.resolverBasePackage & "/" & variables.abstractName & "Resolver";
-			if( len( variables.resolverBasePackage ) && fileExists( resolverPath & ".bx" ) ){
-				var candidate = variables.classFiles.build( resolverPath, "resolver" );
-				if( structKeyExists( candidate, "resolveType" ) ){
-					variables.resolverInstance = candidate;
+		if( variables.resolverChecked ){
+			return variables.resolverInstance;
+		}
+		lock name="#variables.lockName#" type="exclusive" timeout="60" {
+			if( !variables.resolverChecked ){
+				var resolverPath = variables.resolverBasePackage & "/" & variables.abstractName & "Resolver";
+				if( len( variables.resolverBasePackage ) && fileExists( resolverPath & ".bx" ) ){
+					var candidate = variables.classFiles.build( resolverPath, "resolver" );
+					if( structKeyExists( candidate, "resolveType" ) ){
+						variables.resolverInstance = candidate;
+					}
 				}
+				variables.resolverChecked = true;
 			}
 		}
 		return variables.resolverInstance;

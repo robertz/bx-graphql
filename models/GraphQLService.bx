@@ -223,32 +223,42 @@ class {
 		);
 		variables.generatedSDL = generated.sdl;
 
-		try {
-			if( len( generated.sdl ) ){
+		if( len( generated.sdl ) ){
+			try {
 				mergedRegistry = mergedRegistry.merge( variables.javaClass.create( "graphql.schema.idl.SchemaParser" ).init().parse( generated.sdl ) );
+			} catch( any e ){
+				throwSchemaProblem( "The SDL generated from modelPaths/servicePaths can't be added to the schema", e, generated.sdl );
 			}
+		}
 
-			var runtimeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.RuntimeWiring" ).newRuntimeWiring();
-			wireScalars( runtimeWiringBuilder, mergedRegistry );
-			wireResolvers( runtimeWiringBuilder, mergedRegistry, generated );
+		// outside any catch: a failing scalar, service constructor or instanceFactory is reported as itself
+		var runtimeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.RuntimeWiring" ).newRuntimeWiring();
+		wireScalars( runtimeWiringBuilder, mergedRegistry );
+		wireResolvers( runtimeWiringBuilder, mergedRegistry, generated );
+		var runtimeWiring = runtimeWiringBuilder.build();
 
+		try {
 			var graphQLSchema = variables.javaClass.create( "graphql.schema.idl.SchemaGenerator" ).init()
-				.makeExecutableSchema( mergedRegistry, runtimeWiringBuilder.build() );
-		} catch( "BxGraphQL.ConfigurationException" e ){
-			rethrow;
+				.makeExecutableSchema( mergedRegistry, runtimeWiring );
 		} catch( any e ){
 			// with nothing generated, graphql-java's own error is the whole story, as before
 			if( !len( generated.sdl ) ){
 				rethrow;
 			}
-			throw(
-				type    = "BxGraphQL.ConfigurationException",
-				message = "The schema generated from modelPaths/servicePaths doesn't fit: " & e.message,
-				detail  = generated.sdl
-			);
+			throwSchemaProblem( "The schema, hand-written and generated together, isn't valid", e, generated.sdl );
 		}
 
 		variables.engine = variables.javaClass.create( "graphql.GraphQL" ).newGraphQL( graphQLSchema ).build();
+	}
+
+	/** BoxLang's throw() keeps no cause, so the original's type and stack go along as extendedInfo. */
+	private void function throwSchemaProblem( required string what, required any original, required string generatedSDL ){
+		throw(
+			type         = "BxGraphQL.ConfigurationException",
+			message      = arguments.what & ": " & arguments.original.message,
+			detail       = arguments.generatedSDL,
+			extendedInfo = ( arguments.original.type ?: "" ) & char( 10 ) & ( arguments.original.stackTrace ?: "" )
+		);
 	}
 
 	private boolean function hasSetting( required string name ){

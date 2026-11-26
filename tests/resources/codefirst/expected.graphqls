@@ -47,6 +47,7 @@ type Widget {
 		separator: String = "-"
 	): String
 	madeBy: Maker
+	label( status: Status = ACTIVE ): String
 	cost: Float
 }
 

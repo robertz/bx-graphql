@@ -1,0 +1,9 @@
+@graphqlRequires( "admin" )
+class {
+
+	@graphqlQuery
+	string function vault(){
+		return "the vault";
+	}
+
+}

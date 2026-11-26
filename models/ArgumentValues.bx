@@ -1,0 +1,31 @@
+/**
+ * graphql-java hands a field's arguments over as java.util.Maps and Lists. This makes
+ * them BoxLang structs and arrays, all the way down, and leaves every other value as
+ * it is: what a custom scalar's parseValue returned (a date, a BigDecimal) reaches the
+ * function unchanged. A key given as null stays in the struct, with a null value.
+ */
+class {
+
+	any function toBoxLang( any value ){
+		if( isNull( arguments.value ) ){
+			return javaCast( "null", "" );
+		}
+		if( isInstanceOf( arguments.value, "java.util.Map" ) ){
+			var converted = [:];
+			for( var key in arguments.value.keySet().toArray() ){
+				var member = arguments.value.get( key );
+				converted[ toString( key ) ] = isNull( member ) ? javaCast( "null", "" ) : toBoxLang( member );
+			}
+			return converted;
+		}
+		if( isInstanceOf( arguments.value, "java.util.List" ) ){
+			var items = [];
+			for( var item in arguments.value.toArray() ){
+				arrayAppend( items, isNull( item ) ? javaCast( "null", "" ) : toBoxLang( item ) );
+			}
+			return items;
+		}
+		return arguments.value;
+	}
+
+}

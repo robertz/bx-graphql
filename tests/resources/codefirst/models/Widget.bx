@@ -52,6 +52,11 @@ class accessors="true" extends="Timestamped" {
 	}
 
 	@graphqlField
+	string function label( string status = "ACTIVE" graphqlType="Status" ){
+		return variables.name & " (" & arguments.status & ")";
+	}
+
+	@graphqlField
 	@graphqlRequires( "admin" )
 	numeric function cost(){
 		return 4.25;

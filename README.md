@@ -76,7 +76,8 @@ any function fieldName( any source, struct args, any context, any env ){
 	// source  — the parent object (whatever the parent resolver returned, or a plain
 	//           struct/key). NULL for root Query/Mutation fields — don't mark it `required`.
 	// args    — the field's GraphQL arguments, as an ordinary BoxLang struct/array
-	//           (converted from graphql-java's raw arguments via a JSON round-trip).
+	//           (graphql-java's maps and lists made structs and arrays; every other
+	//           value as it was coerced, so a custom scalar's parseValue result arrives as is).
 	// context — whatever was passed as `context` to GraphQLService.execute() — typically
 	//           the current request, however your app represents it.
 	// env     — the raw graphql.schema.DataFetchingEnvironment, for advanced use.
@@ -304,9 +305,10 @@ type Mutation {
 - A default that is a plain string, number or boolean is written into the schema (`limit: Float = 20`). An argument the query leaves out with no such default isn't passed, so the function's own default applies either way.
 - A doc comment's `@parameterName ...` line becomes that argument's description. `@graphqlDeprecated( "why" )`, or a doc comment's `@deprecated why`, marks the field deprecated.
 - Parameters named `context` and `env` receive what a resolver's would, and `args` the arguments as plain structs and arrays. None of the three is an argument in the schema.
-- Annotated functions inherited from a parent class count. A parent that is scanned too still gives one field.
+- Annotated functions inherited from a parent class count. When a parent and its child are both scanned, the field goes to the child, so the child's instance is the one called; that holds when the child overrides the function with the annotation repeated, too. Two scanned classes that supply the same field with neither descending from the other fail at construction time.
 - The return type is mapped from the function's; `@graphqlReturns( "..." )` states it verbatim, and is needed for `array`, `struct`, `any` or no declared type.
 - A parameter typed as an `@graphqlInput` class receives an instance of that class, filled through its setters. So do nested beans, and lists of them: a property typed `Tag[]`, or typed `array` with `@graphqlInputField( "[TagInput!]" )`. A string for a property typed `date` becomes a date. Type the parameter `struct` (with `graphqlType="WidgetInput!"`) to receive the plain struct.
+- An argument itself given as `null` (`widgets( limit: null )`) gets the function's default, the same as one left out: BoxLang gives a parameter its default whenever it receives null. `args` shows which it was.
 - A key given as `null` sets that property to null; a key left out leaves it alone. Both read as null on the bean afterwards, so to tell them apart take `args` as well and look at its keys: `arrayContainsNoCase( structKeyArray( args.input ), "price" )` (`structKeyExists()` is false for a null).
 - One instance of each service class is built at construction time, by `instanceFactory` if given.
 
@@ -328,7 +330,7 @@ Declaring the same type by hand and by annotation, or the same field from two se
 "authorizer" : ( requirement, context, info ) => arrayContains( context.user.roles, requirement )
 ```
 
-`requirement` is the annotation's value (`""` for a bare `@graphqlRequires`), `context` is what was passed to `execute()`, and `info` is `{ type, field, args }`. Anything but `true` refuses the field: it resolves to null, with `Not authorized: Query.secrets` in `errors` (type `BxGraphQL.NotAuthorized`), and the rest of the query carries on. A function's own annotation replaces its class's.
+`requirement` is the annotation's value (`""` for a bare `@graphqlRequires`), `context` is what was passed to `execute()`, and `info` is `{ type, field, args }`. Anything but `true` refuses the field: it resolves to null, with `Not authorized: Query.secrets` in `errors` (type `BxGraphQL.NotAuthorized`), and the rest of the query carries on. A function's own annotation replaces its class's, and a class without one takes its nearest parent's, so a guard on a base class covers the functions its children expose.
 
 Marking anything `@graphqlRequires` without setting `authorizer` fails at construction time. Properties and hand-written resolvers aren't guarded: check `context` in those yourself.
 
@@ -392,6 +394,8 @@ A `scalar` the schema declares needs its conversions, given in `scalars`:
 	}
 }
 ```
+
+What `parseValue` returns is what the resolver or service function receives — a date, a `java.time` value, a `BigDecimal` — not a copy turned to text on the way.
 
 `parseLiteral` (optional) handles a value written in the query itself rather than passed as a variable; it defaults to `parseValue`, given the literal as a plain string, number or boolean. Whatever a conversion throws becomes an entry in `errors`, not a failed request. A declared scalar with no conversions fails at construction time.
 

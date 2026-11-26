@@ -25,6 +25,7 @@ class {
 	variables.hasResolver              = false;
 	variables.resolverChecked          = false;
 	variables.propertyDataFetcherCache = {};
+	variables.lockName                 = "bxgraphql-resolver-" & createUUID();
 
 	function init(
 		required string typeName,
@@ -51,7 +52,7 @@ class {
 		if( variables.hasResolver && structKeyExists( variables.resolverInstance, fieldName ) ){
 			return variables.resolverInstance[ fieldName ](
 				source  = arguments.environment.getSource(),
-				args    = JSONDeserialize( JSONSerialize( arguments.environment.getArguments() ) ),
+				args    = new "ArgumentValues"().toBoxLang( arguments.environment.getArguments() ),
 				context = arguments.environment.getContext(),
 				env     = arguments.environment
 			);
@@ -83,20 +84,26 @@ class {
 		return javaCast( "null", "" );
 	}
 
+	/**
+	 * Built on the first request that needs it, and requests arrive together: the lock
+	 * lets one build it, and resolverChecked is set last, so no request sees "checked"
+	 * before the instance is in place.
+	 */
 	private void function ensureResolverResolved(){
 		if( variables.resolverChecked ){
 			return;
 		}
-		variables.resolverChecked = true;
-
-		var resolverPath = variables.resolverBasePackage & "/" & variables.typeName & "Resolver";
-		if( !len( variables.resolverBasePackage ) || !fileExists( expandPath( resolverPath & ".bx" ) ) ){
-			variables.hasResolver = false;
-			return;
+		lock name="#variables.lockName#" type="exclusive" timeout="60" {
+			if( variables.resolverChecked ){
+				return;
+			}
+			var resolverPath = variables.resolverBasePackage & "/" & variables.typeName & "Resolver";
+			if( len( variables.resolverBasePackage ) && fileExists( expandPath( resolverPath & ".bx" ) ) ){
+				variables.resolverInstance = variables.classFiles.build( resolverPath, "resolver" );
+				variables.hasResolver      = true;
+			}
+			variables.resolverChecked = true;
 		}
-
-		variables.resolverInstance = variables.classFiles.build( resolverPath, "resolver" );
-		variables.hasResolver      = true;
 	}
 
 }

@@ -19,6 +19,14 @@ class {
 		return arguments.args.n;
 	}
 
+	any function dayClass( any source, required struct args ){
+		return arguments.args.day.getClass().getName() & " " & arguments.args.day.getDayOfWeek().toString();
+	}
+
+	any function wordClass( any source, required struct args ){
+		return arguments.args.filter.days.map( ( day ) => day.getClass().getSimpleName() ).toList();
+	}
+
 	any function shout( any source, required struct args ){
 		return arguments.args.word;
 	}

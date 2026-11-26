@@ -48,6 +48,24 @@ class extends="testbox.system.BaseSpec" {
 				expect( arrayLen( result.errors ) ).toBe( 1 );
 			} );
 
+			it( "resolves types and fields correctly when the first requests arrive together", function(){
+				var root    = expandPath( "tests/resources/abstract" );
+				var service = new "../../models/GraphQLService"( {
+					"schemaPaths"         : [ root & "/schema" ],
+					"modelPaths"          : [ root & "/models" ],
+					"servicePaths"        : [ root & "/services" ],
+					"resolverBasePackage" : root & "/resolvers"
+				} );
+				var requests = [];
+				for( var i = 1; i <= 24; i++ ){
+					arrayAppend( requests, i );
+				}
+
+				var answers = requests.map( ( i ) => service.execute( "{ rated { __typename } }" ).data.rated[ 1 ].__typename ?: "none", true, 24 );
+
+				expect( answers.filter( ( answer ) => answer != "Film" ) ).toBeEmpty();
+			} );
+
 			it( "reports a struct with no __typename as an error on that field", function(){
 				var result = variables.graphQLService.execute( "{ untyped { name } }" );
 

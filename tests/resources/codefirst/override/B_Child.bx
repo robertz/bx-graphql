@@ -1,0 +1,8 @@
+class extends="A_Base" {
+
+	@graphqlQuery
+	string function ping(){
+		return "child";
+	}
+
+}

@@ -5,8 +5,10 @@
  * For a Query/Mutation field the function is a service's, on the one instance built at
  * startup. For a bean's @graphqlField function it's called on the field's source.
  *
- * Each GraphQL argument goes to the parameter of the same name; one left out isn't
- * passed, so the function's own default applies. Parameters named `context` and `env`
+ * Each GraphQL argument goes to the parameter of the same name, its values as graphql-java
+ * coerced them (ArgumentValues). One left out isn't passed, so the function's own
+ * default applies; so it does for one given as null, since BoxLang gives a parameter
+ * its default whenever it receives null. Parameters named `context` and `env`
  * get what a resolver's would, and `args` the arguments as plain structs and arrays —
  * the one place an explicit null can be told from a key that was left out.
  *
@@ -36,7 +38,7 @@ class {
 	}
 
 	any function get( required any environment ){
-		var given  = JSONDeserialize( JSONSerialize( arguments.environment.getArguments() ) );
+		var given  = new "ArgumentValues"().toBoxLang( arguments.environment.getArguments() );
 		var target = variables.instance;
 
 		if( variables.operation.guarded ){

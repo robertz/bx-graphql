@@ -1,0 +1,13 @@
+class {
+
+	@graphqlQuery
+	string function ping(){
+		return "base";
+	}
+
+	@graphqlQuery
+	string function who(){
+		return getMetadata( this ).name.listLast( "." );
+	}
+
+}

@@ -1,0 +1,11 @@
+/** Says "hi" */
+@graphqlType
+class accessors="true" {
+
+	/** Lives under C:\ */
+	property name="path" type="string";
+
+	/** Three """ in a row, then "end" */
+	property name="note" type="string";
+
+}
