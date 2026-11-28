@@ -1,0 +1,10 @@
+@graphqlType
+@graphqlRequires( "admin" )
+class accessors="true" {
+
+	property name="total" type="numeric";
+
+	@graphqlRequires( "user" )
+	property name="period" type="string";
+
+}

@@ -1,0 +1,9 @@
+@graphqlType
+class accessors="true" {
+
+	property name="owner" type="string";
+
+	@graphqlRequires( "admin" )
+	property name="balance" type="numeric";
+
+}

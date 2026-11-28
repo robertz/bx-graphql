@@ -1,0 +1,14 @@
+type Query {
+	open: String
+	locked: String
+	account: Account
+	payroll: Payroll
+	staff: Staff
+	whoami: String
+	viaLoader: String
+}
+
+type Staff {
+	name: String
+	salary: Int
+}

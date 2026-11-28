@@ -50,14 +50,13 @@ class {
 		var target = variables.instance;
 
 		if( variables.operation.guarded ){
-			var allowed = variables.authorizer( variables.operation.requirement, arguments.environment.getContext(), {
-				"type"  : variables.operation.rootType,
-				"field" : variables.operation.fieldName,
-				"args"  : given
-			} );
-			if( isNull( allowed ) || !isBoolean( allowed ) || !allowed ){
-				throw( type = "BxGraphQL.NotAuthorized", message = "Not authorized: #variables.operation.rootType#.#variables.operation.fieldName#" );
-			}
+			new "Authorization"( variables.authorizer ).check(
+				requirement = variables.operation.requirement,
+				context     = new "RequestContext"().of( arguments.environment ),
+				type        = variables.operation.rootType,
+				field       = variables.operation.fieldName,
+				args        = given
+			);
 		}
 
 		if( isSimpleValue( target ) ){
@@ -73,7 +72,7 @@ class {
 		var givenKeys = structKeyArray( given );
 		for( var parameter in variables.operation.parameters ){
 			if( parameter.name == "context" ){
-				collected[ parameter.name ] = arguments.environment.getContext();
+				collected[ parameter.name ] = new "RequestContext"().of( arguments.environment );
 			} else if( parameter.name == "env" ){
 				collected[ parameter.name ] = arguments.environment;
 			} else if( parameter.name == "args" ){

@@ -1,0 +1,77 @@
+/**
+ * handle(): a GraphQL-over-HTTP request body, as a struct or as JSON text, in; the
+ * response struct out. Over the same fixtures as GraphQLServiceSpec.
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		variables.settings = {
+			"schemaPaths"         : [ expandPath( "tests/resources/test-schema.graphqls" ) ],
+			"resolverBasePackage" : expandPath( "tests/resources/resolvers" )
+		};
+		variables.graphQLService = new "../../models/GraphQLService"( variables.settings );
+	}
+
+	function run(){
+		describe( "handle()", function(){
+
+			it( "runs a decoded body's query, variables and operationName", function(){
+				var result = variables.graphQLService.handle( {
+					"query"         : "query Version { meta { version } } query One( $id: ID! ){ widget( id: $id ) { id } }",
+					"variables"     : { "id" : "7" },
+					"operationName" : "One"
+				} );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.id ).toBe( "7" );
+			} );
+
+			it( "takes the body as JSON text, null variables included", function(){
+				var result = variables.graphQLService.handle( '{ "query" : "{ meta { version } }", "variables" : null, "operationName" : null }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.meta.version ).toBe( "0.1.0" );
+			} );
+
+			it( "passes its second argument to resolvers as context", function(){
+				var service = new "../../models/GraphQLService"( {
+					"servicePaths" : [ expandPath( "tests/resources/codefirst/guarded" ) ],
+					"authorizer"   : ( requirement, context, info ) => isStruct( context ) && context.role == requirement
+				} );
+
+				expect( service.handle( { "query" : "{ vault }" }, { "role" : "admin" } ).data.vault ).toBe( "the vault" );
+			} );
+
+			it( "answers a body with no query with an error, not an exception", function(){
+				var result = variables.graphQLService.handle( { "variables" : {} } );
+
+				expect( isNull( result.data ) ).toBeTrue();
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ] ).toInclude( "query" );
+			} );
+
+			it( "answers text that isn't JSON with an error", function(){
+				var result = variables.graphQLService.handle( "{ meta { version } }" );
+
+				expect( isNull( result.data ) ).toBeTrue();
+				expect( result.errors[ 1 ] ).toInclude( "JSON" );
+			} );
+
+			it( "answers variables that aren't an object with an error", function(){
+				var result = variables.graphQLService.handle( { "query" : "{ meta { version } }", "variables" : "id=7" } );
+
+				expect( isNull( result.data ) ).toBeTrue();
+				expect( result.errors[ 1 ] ).toInclude( "variables" );
+			} );
+
+			it( "gives those errors as structs with structuredErrors", function(){
+				var settings = duplicate( variables.settings ).append( { "structuredErrors" : true } );
+				var result   = new "../../models/GraphQLService"( settings ).handle( {} );
+
+				expect( result.errors[ 1 ].message ).toInclude( "query" );
+			} );
+
+		} );
+	}
+
+}

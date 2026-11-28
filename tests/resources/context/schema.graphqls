@@ -1,0 +1,6 @@
+type Query {
+	"The app's context, read from graphql-java's GraphQLContext."
+	carried: String
+	"Whether the deprecated getContext() still returns the app's context."
+	legacy: Boolean
+}

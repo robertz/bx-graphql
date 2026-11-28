@@ -1,0 +1,8 @@
+@graphqlRequires( "admin" )
+class {
+
+	function salary(){
+		return 50000;
+	}
+
+}

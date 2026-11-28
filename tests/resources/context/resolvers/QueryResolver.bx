@@ -1,0 +1,12 @@
+class {
+
+	function carried( any source, struct args, any context, any env ){
+		return arguments.env.getGraphQlContext().get( "bxgraphql.context" ).name;
+	}
+
+	function legacy( any source, struct args, any context, any env ){
+		var old = arguments.env.getContext();
+		return !isNull( old ) && isStruct( old ) && ( old.name ?: "" ) == "rob";
+	}
+
+}

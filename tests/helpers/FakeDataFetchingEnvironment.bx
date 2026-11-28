@@ -3,7 +3,7 @@
  * unit-tested without spinning up a real graphql-java engine. BoxLang dispatches
  * method calls dynamically, so a plain class exposing the handful of methods
  * DataFetcherAdapter.get() actually calls — getField(), getSource(), getArguments(),
- * getContext() — is indistinguishable to it from the real Java type.
+ * getGraphQlContext() — is indistinguishable to it from the real Java type.
  *
  * getField() returns `this`, since the real environment.getField() itself just needs
  * to answer getName() — no separate fake field class required.
@@ -39,8 +39,10 @@ class {
 		return variables.args;
 	}
 
-	any function getContext(){
-		return variables.context;
+	any function getGraphQlContext(){
+		var graphQLContext = createObject( "java", "java.util.HashMap" ).init();
+		graphQLContext.put( "bxgraphql.context", variables.context );
+		return graphQLContext;
 	}
 
 }

@@ -1,0 +1,12 @@
+/**
+ * The context an app gave execute(), as a resolver, authorizer or type resolver sees it.
+ * It travels in graphql-java's GraphQLContext under one key, since the single context
+ * object graphql-java used to carry (ExecutionInput.context(), getContext()) is deprecated.
+ */
+class {
+
+	any function of( required any environment ){
+		return arguments.environment.getGraphQlContext().get( "bxgraphql.context" ) ?: "";
+	}
+
+}

@@ -1,0 +1,123 @@
+/**
+ * operationName, and the settings that bound what a client may ask: maxQueryDepth,
+ * maxQueryComplexity and introspection. Over the same fixtures as GraphQLServiceSpec.
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function run(){
+		describe( "operationName", function(){
+
+			it( "runs the named operation of a document that holds several", function(){
+				var result = serviceWith( {} ).execute(
+					query         = 'query First { meta { version } } query Second { widget(id: "1") { name } }',
+					operationName = "Second"
+				);
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.name ).toBe( "Test Widget" );
+				expect( structKeyExists( result.data, "meta" ) ).toBeFalse();
+			} );
+
+		} );
+
+		describe( "maxQueryDepth", function(){
+
+			it( "refuses a query nested deeper than the limit", function(){
+				var result = serviceWith( { "maxQueryDepth" : 1 } ).execute( '{ widget(id: "1") { name } }' );
+
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ] ).toInclude( "depth" );
+			} );
+
+			it( "lets through a query at the limit", function(){
+				var result = serviceWith( { "maxQueryDepth" : 2 } ).execute( '{ widget(id: "1") { name } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.name ).toBe( "Test Widget" );
+			} );
+
+			it( "fails at construction time when it isn't a whole number above zero", function(){
+				expect( function(){
+					serviceWith( { "maxQueryDepth" : "deep" } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+				expect( function(){
+					serviceWith( { "maxQueryDepth" : 0 } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+			} );
+
+		} );
+
+		describe( "maxQueryComplexity", function(){
+
+			it( "refuses a query asking for more fields than the limit", function(){
+				var result = serviceWith( { "maxQueryComplexity" : 2 } ).execute( '{ widget(id: "1") { id name description } }' );
+
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ] ).toInclude( "complexity" );
+			} );
+
+			it( "lets through a query at the limit", function(){
+				var result = serviceWith( { "maxQueryComplexity" : 2 } ).execute( '{ widget(id: "1") { name } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.widget.name ).toBe( "Test Widget" );
+			} );
+
+			it( "applies alongside maxQueryDepth", function(){
+				var service = serviceWith( { "maxQueryDepth" : 1, "maxQueryComplexity" : 2 } );
+
+				expect( service.execute( '{ widget(id: "1") { name } }' ).errors[ 1 ] ).toInclude( "depth" );
+				expect( service.execute( "{ __typename }" ).errors ).toBeEmpty();
+			} );
+
+			it( "fails at construction time when it isn't a whole number above zero", function(){
+				expect( function(){
+					serviceWith( { "maxQueryComplexity" : 1.5 } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+			} );
+
+		} );
+
+		describe( "introspection", function(){
+
+			it( "is available by default", function(){
+				var result = serviceWith( {} ).execute( "{ __schema { queryType { name } } }" );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data[ "__schema" ].queryType.name ).toBe( "Query" );
+			} );
+
+			it( "is refused when set to false", function(){
+				var result = serviceWith( { "introspection" : false } ).execute( "{ __schema { queryType { name } } }" );
+
+				expect( arrayLen( result.errors ) ).toBeGT( 0 );
+				expect( isNull( result.data ) || !isStruct( result.data ) || isNull( result.data[ "__schema" ] ) ).toBeTrue();
+			} );
+
+			it( "leaves ordinary queries and __typename alone when set to false", function(){
+				var result = serviceWith( { "introspection" : false } ).execute( '{ __typename widget(id: "1") { name } }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data[ "__typename" ] ).toBe( "Query" );
+				expect( result.data.widget.name ).toBe( "Test Widget" );
+			} );
+
+			it( "fails at construction time when it isn't a boolean", function(){
+				expect( function(){
+					serviceWith( { "introspection" : "sometimes" } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+			} );
+
+		} );
+	}
+
+	private any function serviceWith( required struct extra ){
+		var settings = {
+			"schemaPaths"         : [ expandPath( "tests/resources/test-schema.graphqls" ) ],
+			"resolverBasePackage" : expandPath( "tests/resources/resolvers" )
+		};
+		structAppend( settings, arguments.extra );
+		return new "../../models/GraphQLService"( settings );
+	}
+
+}

@@ -41,7 +41,7 @@ class {
 	private string function nameFor( any value, required any environment ){
 		var custom = customResolver();
 		if( !isSimpleValue( custom ) ){
-			return custom.resolveType( value = arguments.value, context = arguments.environment.getContext(), env = arguments.environment ) ?: "";
+			return custom.resolveType( value = arguments.value, context = new "RequestContext"().of( arguments.environment ), env = arguments.environment ) ?: "";
 		}
 		if( isNull( arguments.value ) ){
 			return "";

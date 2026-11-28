@@ -1,0 +1,82 @@
+/**
+ * settings.maskErrors: what a client is told when a resolver or service function throws.
+ * Over the code-first fixtures, whose AdminService.fail() throws Shop.OutOfStock "None left".
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function run(){
+		describe( "maskErrors", function(){
+
+			it( "replaces a thrown exception's message and leaves its type out", function(){
+				var error = serviceWith( { "maskErrors" : true } ).execute( query = "mutation { fail }", context = admin() ).errors[ 1 ];
+
+				expect( error.message ).toBe( "Internal server error" );
+				expect( error.path ).toBe( [ "fail" ] );
+				expect( structKeyExists( error.extensions, "type" ) ).toBeFalse();
+				expect( error.extensions.classification ).toBe( "DataFetchingException" );
+			} );
+
+			it( "replaces the whole message string without structuredErrors", function(){
+				var result = serviceWith( { "maskErrors" : true, "structuredErrors" : false } ).execute( query = "mutation { fail }", context = admin() );
+
+				expect( result.errors ).toBe( [ "Internal server error" ] );
+			} );
+
+			it( "still hands onError the real message and exception", function(){
+				var seen = [];
+				serviceWith( { "maskErrors" : true, "onError" : ( detail ) => arrayAppend( seen, detail ) } )
+					.execute( query = "mutation { fail }", context = admin() );
+
+				expect( seen[ 1 ].message ).toBe( "None left" );
+				expect( seen[ 1 ].type ).toBe( "Shop.OutOfStock" );
+				expect( seen[ 1 ].exception.getMessage() ).toBe( "None left" );
+			} );
+
+			it( "leaves the module's own refusals as they are", function(){
+				var error = serviceWith( { "maskErrors" : true } ).execute( "{ secrets }" ).errors[ 1 ];
+
+				expect( error.message ).toBe( "Not authorized: Query.secrets" );
+				expect( error.extensions.type ).toBe( "BxGraphQL.NotAuthorized" );
+			} );
+
+			it( "leaves a query's own mistakes as they are", function(){
+				var error = serviceWith( { "maskErrors" : true } ).execute( "{ noSuchField }" ).errors[ 1 ];
+
+				expect( error.message ).toInclude( "noSuchField" );
+			} );
+
+			it( "uses what a function returns as the message, and keeps the type", function(){
+				var error = serviceWith( { "maskErrors" : ( detail ) => "Sorry: " & detail.message } )
+					.execute( query = "mutation { fail }", context = admin() ).errors[ 1 ];
+
+				expect( error.message ).toBe( "Sorry: None left" );
+				expect( error.extensions.type ).toBe( "Shop.OutOfStock" );
+			} );
+
+			it( "fails at construction time when it is neither a boolean nor a function", function(){
+				expect( function(){
+					serviceWith( { "maskErrors" : "quietly" } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException" );
+			} );
+
+		} );
+	}
+
+	private struct function admin(){
+		return { "roles" : [ "admin" ] };
+	}
+
+	private any function serviceWith( required struct extra ){
+		var root     = expandPath( "tests/resources/codefirst" );
+		var settings = {
+			"modelPaths"       : [ root & "/models" ],
+			"servicePaths"     : [ root & "/services" ],
+			"structuredErrors" : true,
+			"authorizer"       : ( requirement, context, info ) => isStruct( context ) && ( context.roles ?: [] ).contains( requirement ),
+			"loaders"          : { "makers" : ( keys, context ) => {} }
+		};
+		structAppend( settings, arguments.extra );
+		return new "../../models/GraphQLService"( settings );
+	}
+
+}

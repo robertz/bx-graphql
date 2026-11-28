@@ -61,7 +61,11 @@ Passed as a struct to `GraphQLService.init()`:
 | `loaders` | No | `{ name : ( keys, context ) => values }`. See *Batch loading* below. |
 | `structuredErrors` | No | `true` to get `errors` as structs rather than message strings. See *Errors* below. |
 | `onError` | No | `( detail ) => {}`, called once per error. See *Errors* below. |
+| `maskErrors` | No | `true`, or `( detail ) => message`: what a client is told when a resolver throws. See *Errors* below. |
 | `scalars` | No | `{ ScalarName : { serialize, parseValue, parseLiteral? } }`. See *Custom scalars* below. |
+| `maxQueryDepth` | No | A whole number above zero. A query nested deeper is refused before any resolver runs. See *Limiting queries* below. |
+| `maxQueryComplexity` | No | A whole number above zero. A query asking for more fields is refused before any resolver runs. |
+| `introspection` | No | `false` to refuse `__schema` and `__type` queries. Default: `true`. |
 
 ## Resolver convention
 
@@ -83,6 +87,8 @@ any function fieldName( any source, struct args, any context, any env ){
 	// env     — the raw graphql.schema.DataFetchingEnvironment, for advanced use.
 }
 ```
+
+Take the context from the `context` argument, not from `env.getContext()`: graphql-java has deprecated that, and the module no longer fills it. (It travels in `env.getGraphQlContext()` under the key `bxgraphql.context`.)
 
 ### Example
 
@@ -199,7 +205,7 @@ Only annotated classes are exposed. Within one, every property is a field unless
 | `@graphqlField` or `@graphqlField( "SDL type" )` | function | The function is a field of the type (not the input). See *Functions as fields* below. |
 | `@graphqlImplements( "Node, Named" )` | class | The type `implements` those interfaces. See *Interfaces and unions* below. |
 | `@graphqlEnum( "A, B, C" )` | class | Emit `enum {SimpleName}` with those values, and nothing else from the class. See *Enums* below. |
-| `@graphqlRequires( "what" )` | class, function | Guarded: see *Authorization* below. |
+| `@graphqlRequires( "what" )` | class, property, function | Guarded: see *Authorization* below. |
 
 An annotation's value needs parentheses: `@graphqlField( "[Tag!]" )`, not `@graphqlField "[Tag!]"`.
 
@@ -324,15 +330,17 @@ Declaring the same type by hand and by annotation, or the same field from two se
 
 ## Authorization
 
-`@graphqlRequires( "what" )` on a service function, a bean's `@graphqlField` function, or a whole class guards those fields. Before a guarded function is called, `authorizer` is asked:
+`@graphqlRequires( "what" )` guards a field. It goes on a service function, on a bean's property or `@graphqlField` function, on a method of a hand-written `{Type}Resolver.bx`, or on any of those classes to cover everything in it. Before a guarded field is read or its function called, `authorizer` is asked:
 
 ```javascript
 "authorizer" : ( requirement, context, info ) => arrayContains( context.user.roles, requirement )
 ```
 
-`requirement` is the annotation's value (`""` for a bare `@graphqlRequires`), `context` is what was passed to `execute()`, and `info` is `{ type, field, args }`. Anything but `true` refuses the field: it resolves to null, with `Not authorized: Query.secrets` in `errors` (type `BxGraphQL.NotAuthorized`), and the rest of the query carries on. A function's own annotation replaces its class's, and a class without one takes its nearest parent's, so a guard on a base class covers the functions its children expose.
+`requirement` is the annotation's value (`""` for a bare `@graphqlRequires`), `context` is what was passed to `execute()`, and `info` is `{ type, field, args }`. Anything but `true` refuses the field: it resolves to null, with `Not authorized: Query.secrets` in `errors` (type `BxGraphQL.NotAuthorized`), and the rest of the query carries on. A property's or function's own annotation replaces its class's, and a class without one takes its nearest parent's, so a guard on a base class covers what its children expose.
 
-Marking anything `@graphqlRequires` without setting `authorizer` fails at construction time. Properties and hand-written resolvers aren't guarded: check `context` in those yourself.
+A guard on a bean's class covers its properties in the type (an input isn't guarded). One on a resolver class covers that resolver's methods, not the fields read straight off the parent. A field written only in a `.graphqls` file, with no resolver method, has nothing to carry the annotation: give it a resolver method, or check `context` where its parent is loaded.
+
+Marking anything `@graphqlRequires` without setting `authorizer` fails at construction time.
 
 ## Batch loading
 
@@ -382,6 +390,16 @@ A value none of these can place is an error on that field.
 
 Either way, `onError` is called once per error with `{ message, rawMessage, path, locations, type, classification, exception }` (`exception` being the one thrown, if any): the place to log what `errors` only summarizes.
 
+### Masking
+
+An exception's message can say more than a client should read: a table name, a file path. With `"maskErrors" : true`, whatever a resolver or service function throws reaches the client as `Internal server error`, with no `type`; `onError` still gets all of it. To let some messages through, give a function instead, whose answer is the message:
+
+```javascript
+"maskErrors" : ( detail ) => left( detail.type, 5 ) == "Shop." ? detail.message : "Something went wrong"
+```
+
+Errors in the query itself and the module's own refusals (`BxGraphQL.NotAuthorized`, `BxGraphQL.NullArgument`) are never masked.
+
 ## Custom scalars
 
 A `scalar` the schema declares needs its conversions, given in `scalars`:
@@ -410,11 +428,35 @@ Two need no configuration:
 result = graphQLService.execute(
 	query          = "...",    // required
 	queryVariables = {},       // optional — GraphQL $variables
-	context        = ""        // optional — forwarded as-is to every resolver's `context` arg
+	context        = "",       // optional — forwarded as-is to every resolver's `context` arg
+	operationName  = ""        // optional — which operation to run, when the query holds several
 )
 ```
 
 Returns a plain BoxLang struct — `{ data : {...}, errors : [...] }` — so callers never touch graphql-java classes directly. `errors` is always present (an empty array on success): message strings by default, structs with `structuredErrors`. See *Errors* above.
+
+### From a request body
+
+`handle()` does the same for a GraphQL-over-HTTP request body, given as a struct or as the JSON text it arrived as:
+
+```javascript
+result = graphQLService.handle( requestBodyText, context )
+// body: { "query" : "...", "variables" : { ... }, "operationName" : "..." }
+```
+
+Only `query` is required. A body that can't be run (not JSON, no query, `variables` that isn't an object) comes back as `{ data : null, errors : [ ... ] }` rather than an exception. Routing, status codes and the response's content type stay with your app.
+
+## Limiting queries
+
+For an endpoint anyone can reach, bound what one query may ask for:
+
+```javascript
+"maxQueryDepth"      : 8,
+"maxQueryComplexity" : 200,
+"introspection"      : false
+```
+
+Depth counts levels of nesting: `{ widget { name } }` is 2. Complexity counts fields: `{ widget { id name } }` is 3. A query over either limit comes back with one entry in `errors` and no data, and no resolver is called. `"introspection" : false` refuses `__schema` and `__type`; `__typename` still works.
 
 ## Accessing the schema programmatically
 
@@ -425,8 +467,6 @@ Returns a plain BoxLang struct — `{ data : {...}, errors : [...] }` — so cal
 - Operations (CRUD) generated from a bean alone
 - Interfaces, unions and input unions generated from classes: they are written in SDL (see *Interfaces and unions*)
 - Subscriptions
-- Guarding a property with `@graphqlRequires` (functions only)
-- An introspection on/off toggle (introspection is always available, per graphql-java's default)
 
 ## Tests
 
@@ -437,7 +477,7 @@ boxlang setup-tests.bxs   # once per checkout
 boxlang run-tests.bxs     # every time after that
 ```
 
-`run-tests.bxs` exits non-zero on any failure/error, so it's CI-friendly — just run `setup-tests.bxs` once beforehand (e.g. in a CI image build step). Structure:
+`run-tests.bxs` exits non-zero on any failure/error, so it's CI-friendly — just run `setup-tests.bxs` once beforehand (e.g. in a CI image build step); `.github/workflows/tests.yml` does exactly that on every push and pull request. Structure:
 
 - `tests/specs/GraphQLServiceSpec.bx` — the resolver convention end-to-end against a real engine: `PropertyDataFetcher` fallback, explicit-resolver precedence, missing-resolver-class fallback, query variables actually reaching resolver arguments, and spec-shaped errors for an invalid query.
 - `tests/specs/GraphQLServiceConfigSpec.bx` — startup config validation: missing/invalid `schemaPaths` or `resolverBasePackage`, including a wildcard `schemaPaths` entry whose directory doesn't exist.
@@ -448,6 +488,10 @@ boxlang run-tests.bxs     # every time after that
 - `tests/specs/CodeFirstSpec.bx` — schema and operations generated from the annotated beans and services under `tests/resources/codefirst`, alone and merged with a hand-written file. `expected.graphqls` there is the SDL they should generate.
 - `tests/specs/CodeFirstFeaturesSpec.bx` — the same fixtures: enums, bean functions as fields, inherited functions, defaults and deprecation, lists and nulls in inputs, authorization, structured errors, batch loaders, `instanceFactory`'s kinds.
 - `tests/specs/AbstractTypesSpec.bx` — interfaces and unions, over `tests/resources/abstract`.
+- `tests/specs/ErrorMaskingSpec.bx` — `maskErrors`, as `true` and as a function.
+- `tests/specs/HandleSpec.bx` — `handle()`: request bodies as structs and as JSON, and the ones it refuses.
+- `tests/specs/GuardsSpec.bx` — `@graphqlRequires` on properties and hand-written resolvers, over `tests/resources/guards`, and the context reaching resolvers and loaders.
+- `tests/specs/RequestOptionsSpec.bx` — `operationName`, and the `maxQueryDepth`, `maxQueryComplexity` and `introspection` settings.
 - `tests/specs/BifsSpec.bx` — the `bxGraphQL()` global BIF, built entirely through the friendly entry point rather than `new bxModules.bxgraphql.models.GraphQLService()` directly.
 
 `setup-tests.bxs` creates a self-referencing `boxlang_modules/bxgraphql` symlink (gitignored, not committed) so BoxLang discovers this project as a real module and loads `libs/` onto the classloader `createObject("java", ...)` sees — module discovery only happens once at BoxLang process startup, so this has to run as its own invocation before `run-tests.bxs`, not get folded into it.

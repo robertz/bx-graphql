@@ -3,8 +3,6 @@
  * adds the SDL generated from annotated classes (SchemaGenerator), and wires
  * convention-based DataFetchers. Built once at construction time — not per request.
  * No WireBox; settings are passed directly to init().
- *
- * Deferred: introspection toggle.
  */
 class {
 
@@ -53,12 +51,24 @@ class {
 	 * settings.onError, if given, is called once per error with
 	 * { message, path, locations, type, classification, exception }.
 	 */
-	struct function execute( required string query, struct queryVariables = {}, any context = "" ){
+	struct function execute( required string query, struct queryVariables = {}, any context = "", string operationName = "" ){
 		var executionInputBuilder = variables.javaClass.create( "graphql.ExecutionInput" )
 			.newExecutionInput()
 			.query( arguments.query )
-			.context( arguments.context )
 
+		// the app's context rides in graphql-java's GraphQLContext, which holds no nulls: see RequestContext
+		var graphQLContext = variables.javaClass.create( "java.util.HashMap" ).init();
+		if( !isNull( arguments.context ) ){
+			graphQLContext.put( "bxgraphql.context", arguments.context );
+		}
+		if( !introspectionAllowed() ){
+			graphQLContext.put( "INTROSPECTION_DISABLED", javaCast( "boolean", true ) );
+		}
+		executionInputBuilder = executionInputBuilder.graphQLContext( graphQLContext )
+
+		if( len( arguments.operationName ) ){
+			executionInputBuilder = executionInputBuilder.operationName( arguments.operationName )
+		}
 		if( !structIsEmpty( arguments.queryVariables ) ){
 			executionInputBuilder = executionInputBuilder.variables( toJavaMap( arguments.queryVariables ) )
 		}
@@ -75,11 +85,77 @@ class {
 			}
 		}
 
-		var structured = isBoolean( variables.settings.structuredErrors ?: "" ) && variables.settings.structuredErrors;
 		return {
 			"data"   : result.getData(),
-			"errors" : details.map( ( detail ) => structured ? specErrorOf( detail ) : detail.rawMessage )
+			"errors" : details.map( ( detail ) => clientErrorOf( maskedOf( detail ) ) )
 		};
+	}
+
+	/**
+	 * execute() for a GraphQL-over-HTTP request body: { query, variables?, operationName? }
+	 * as a struct, or as the JSON text it arrived as. A body that can't be run is answered
+	 * with an entry in errors rather than an exception.
+	 */
+	struct function handle( required any body, any context = "" ){
+		var requestBody = arguments.body;
+		if( isSimpleValue( requestBody ) ){
+			if( !isJSON( requestBody ) ){
+				return refusalOf( "The request body isn't valid JSON." );
+			}
+			requestBody = jsonDeserialize( requestBody );
+		}
+		if( !isStruct( requestBody ) ){
+			return refusalOf( "The request body must be a JSON object." );
+		}
+
+		var query          = requestBody.query ?: "";
+		var queryVariables = requestBody.variables ?: {};
+		var operationName  = requestBody.operationName ?: "";
+		if( !isSimpleValue( query ) || !len( trim( query ) ) ){
+			return refusalOf( "The request has no query." );
+		}
+		if( !isStruct( queryVariables ) ){
+			return refusalOf( "The request's variables must be an object." );
+		}
+		if( !isSimpleValue( operationName ) ){
+			return refusalOf( "The request's operationName must be a string." );
+		}
+
+		return execute( query = query, queryVariables = queryVariables, context = arguments.context, operationName = operationName );
+	}
+
+	private struct function refusalOf( required string message ){
+		return {
+			"data"   : javaCast( "null", "" ),
+			"errors" : [ clientErrorOf( { "message" : arguments.message, "rawMessage" : arguments.message, "path" : [], "locations" : [], "type" : "", "classification" : "" } ) ]
+		};
+	}
+
+	private any function clientErrorOf( required struct detail ){
+		var structured = isBoolean( variables.settings.structuredErrors ?: "" ) && variables.settings.structuredErrors;
+		return structured ? specErrorOf( arguments.detail ) : arguments.detail.rawMessage;
+	}
+
+	/**
+	 * What a client sees of an exception a resolver or service function threw, under
+	 * settings.maskErrors: a fixed message and no type for true, the function's answer
+	 * for a function. The module's own refusals (BxGraphQL.*) and errors in the query
+	 * itself say nothing about the app's insides, and pass as they are.
+	 */
+	private struct function maskedOf( required struct detail ){
+		var mask = variables.settings.maskErrors ?: false;
+		if( isNull( arguments.detail.exception ) || left( arguments.detail.type, 10 ) == "BxGraphQL." || ( !isFunctionValue( mask ) && !mask ) ){
+			return arguments.detail;
+		}
+		var shown = structCopy( arguments.detail );
+		if( isFunctionValue( mask ) ){
+			shown.message = mask( arguments.detail );
+		} else {
+			shown.message = "Internal server error";
+			shown.type    = "";
+		}
+		shown.rawMessage = shown.message;
+		return shown;
 	}
 
 	/**
@@ -248,7 +324,24 @@ class {
 			throwSchemaProblem( "The schema, hand-written and generated together, isn't valid", e, generated.sdl );
 		}
 
-		variables.engine = variables.javaClass.create( "graphql.GraphQL" ).newGraphQL( graphQLSchema ).build();
+		var engineBuilder = variables.javaClass.create( "graphql.GraphQL" ).newGraphQL( graphQLSchema );
+		var limits        = variables.javaClass.create( "java.util.ArrayList" ).init();
+		if( structKeyExists( variables.settings, "maxQueryDepth" ) ){
+			limits.add( variables.javaClass.create( "graphql.analysis.MaxQueryDepthInstrumentation" ).init( javaCast( "int", variables.settings.maxQueryDepth ) ) );
+		}
+		if( structKeyExists( variables.settings, "maxQueryComplexity" ) ){
+			limits.add( variables.javaClass.create( "graphql.analysis.MaxQueryComplexityInstrumentation" ).init( javaCast( "int", variables.settings.maxQueryComplexity ) ) );
+		}
+		if( !limits.isEmpty() ){
+			engineBuilder = engineBuilder.instrumentation(
+				variables.javaClass.create( "graphql.execution.instrumentation.ChainedInstrumentation" ).init( limits )
+			);
+		}
+		variables.engine = engineBuilder.build();
+	}
+
+	private boolean function introspectionAllowed(){
+		return variables.settings.introspection ?: true;
 	}
 
 	/** BoxLang's throw() keeps no cause, so the original's type and stack go along as extendedInfo. */
@@ -304,6 +397,17 @@ class {
 			if( structKeyExists( variables.settings, name ) && !isFunctionValue( variables.settings[ name ] ) ){
 				throw( type = "BxGraphQL.ConfigurationException", message = "#name# must be a function." );
 			}
+		}
+		for( var name in [ "maxQueryDepth", "maxQueryComplexity" ] ){
+			if( structKeyExists( variables.settings, name ) && !( isNumeric( variables.settings[ name ] ) && int( variables.settings[ name ] ) == variables.settings[ name ] && variables.settings[ name ] > 0 ) ){
+				throw( type = "BxGraphQL.ConfigurationException", message = "#name# must be a whole number above zero." );
+			}
+		}
+		if( structKeyExists( variables.settings, "maskErrors" ) && !isFunctionValue( variables.settings.maskErrors ) && !( isBoolean( variables.settings.maskErrors ) && !isNumeric( variables.settings.maskErrors ) ) ){
+			throw( type = "BxGraphQL.ConfigurationException", message = "maskErrors must be true, false or a function: ( detail ) => message." );
+		}
+		if( structKeyExists( variables.settings, "introspection" ) && !( isBoolean( variables.settings.introspection ) && !isNumeric( variables.settings.introspection ) ) ){
+			throw( type = "BxGraphQL.ConfigurationException", message = "introspection must be true or false." );
 		}
 		if( structKeyExists( variables.settings, "loaders" ) && ( !isStruct( variables.settings.loaders ) || structSome( variables.settings.loaders, ( name, loader ) => !isFunctionValue( loader ) ) ) ){
 			throw( type = "BxGraphQL.ConfigurationException", message = "loaders must be a struct of { name : ( keys, context ) => values }." );
@@ -449,7 +553,9 @@ class {
 				typeName            = typeName,
 				resolverBasePackage = resolverBasePackage,
 				javaClass           = variables.javaClass,
-				classFiles          = variables.classFiles
+				classFiles          = variables.classFiles,
+				guards              = arguments.generated.guards[ typeName ] ?: {},
+				authorizer          = hasAuthorizer ? variables.settings.authorizer : ""
 			);
 			var typeWiringBuilder = variables.javaClass.create( "graphql.schema.idl.TypeRuntimeWiring" )
 				.newTypeWiring( typeName )

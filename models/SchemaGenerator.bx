@@ -34,7 +34,8 @@ class {
 	 * @return { sdl,
 	 *           models : { SimpleName : { classPath, meta, typeName, inputName, enumName, enumValues } },
 	 *           operations : [ { rootType, fieldName, classPath ("" = called on the field's source),
-	 *                            methodName, parameters, meta, where, guarded, requirement } ] }
+	 *                            methodName, parameters, meta, where, guarded, requirement } ],
+	 *           guards : { TypeName : { propertyName : { requirement, where } } } }
 	 */
 	struct function generate( required array modelPaths, required array servicePaths, required array existingTypeNames ){
 		var models     = modelsIn( arguments.modelPaths );
@@ -42,6 +43,7 @@ class {
 		var operations = operationsIn( arguments.servicePaths );
 		var blocks     = [];
 		var typeTexts  = [];
+		var guards     = {};
 
 		for( var simpleName in structKeyArray( models ).sort( "textnocase" ) ){
 			var model = models[ simpleName ];
@@ -49,10 +51,10 @@ class {
 				arrayAppend( blocks, description( model.meta.documentation.hint ?: "", "" ) & "enum #model.enumName# {" & char( 10 ) & char( 9 ) & arrayToList( model.enumValues, char( 10 ) & char( 9 ) ) & char( 10 ) & "}" );
 			}
 			if( len( model.typeName ) ){
-				arrayAppend( blocks, beanBlock( "type", model.typeName, model, mapper, false, operations, typeTexts, models ) );
+				arrayAppend( blocks, beanBlock( "type", model.typeName, model, mapper, false, operations, typeTexts, models, guards ) );
 			}
 			if( len( model.inputName ) ){
-				arrayAppend( blocks, beanBlock( "input", model.inputName, model, mapper, true, operations, typeTexts, models ) );
+				arrayAppend( blocks, beanBlock( "input", model.inputName, model, mapper, true, operations, typeTexts, models, guards ) );
 			}
 		}
 
@@ -77,7 +79,7 @@ class {
 			}
 		}
 
-		return { "sdl" : sdl, "models" : models, "operations" : operations };
+		return { "sdl" : sdl, "models" : models, "operations" : operations, "guards" : guards };
 	}
 
 	private struct function modelsIn( required array modelPaths ){
@@ -181,18 +183,8 @@ class {
 		return names;
 	}
 
-	/**
-	 * BoxLang doesn't hand a class's annotations down to its children, so the class-level
-	 * @graphqlRequires is looked for on the scanned class and then up through its
-	 * parents: the nearest one applies. The function's own always wins, even when empty.
-	 */
 	private struct function operationOf( required string rootType, required string fieldName, required string classPath, required struct fn, required struct classMeta, required string where ){
-		var onFunction = structKeyExists( arguments.fn.annotations, "graphqlRequires" );
-		var guardClass = arguments.classMeta;
-		while( !structIsEmpty( guardClass ) && !structKeyExists( guardClass.annotations ?: {}, "graphqlRequires" ) ){
-			guardClass = guardClass.extends ?: {};
-		}
-		var onClass = !structIsEmpty( guardClass );
+		var guard = variables.classFiles.requirementOf( arguments.fn.annotations, arguments.classMeta );
 		return {
 			"rootType"    : arguments.rootType,
 			"fieldName"   : arguments.fieldName,
@@ -201,8 +193,8 @@ class {
 			"parameters"  : arguments.fn.parameters,
 			"meta"        : arguments.fn,
 			"where"       : arguments.where,
-			"guarded"     : onFunction || onClass,
-			"requirement" : onFunction ? arguments.fn.annotations.graphqlRequires : ( onClass ? guardClass.annotations.graphqlRequires : "" )
+			"guarded"     : guard.guarded,
+			"requirement" : guard.requirement
 		};
 	}
 
@@ -214,9 +206,13 @@ class {
 		required boolean forInput,
 		required array operations,
 		required array typeTexts,
-		required struct models
+		required struct models,
+		required struct guards
 	){
 		var lines = [];
+		if( !arguments.forInput ){
+			arguments.guards[ arguments.name ] = {};
+		}
 		var meta  = arguments.model.meta;
 		for( var property in variables.classFiles.propertiesOf( meta ) ){
 			var annotations = property.annotations;
@@ -240,6 +236,10 @@ class {
 				}
 			}
 			arrayAppend( arguments.typeTexts, fieldType );
+			var guard = variables.classFiles.requirementOf( annotations, meta );
+			if( !arguments.forInput && guard.guarded ){
+				arguments.guards[ arguments.name ][ property.name ] = { "requirement" : guard.requirement, "where" : where };
+			}
 			arrayAppend(
 				lines,
 				description( property.documentation.hint ?: "", char( 9 ) ) & char( 9 ) & property.name & ": " & fieldType

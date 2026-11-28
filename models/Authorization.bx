@@ -1,0 +1,25 @@
+/**
+ * Asks settings.authorizer, ( requirement, context, info ) => boolean, about one
+ * guarded field. Anything but true refuses it.
+ */
+class {
+
+	variables.authorizer = "";
+
+	function init( required any authorizer ){
+		variables.authorizer = arguments.authorizer;
+		return this;
+	}
+
+	void function check( required string requirement, any context, required string type, required string field, required any args ){
+		var allowed = variables.authorizer( arguments.requirement, arguments.context ?: "", {
+			"type"  : arguments.type,
+			"field" : arguments.field,
+			"args"  : arguments.args
+		} );
+		if( isNull( allowed ) || !isBoolean( allowed ) || !allowed ){
+			throw( type = "BxGraphQL.NotAuthorized", message = "Not authorized: #arguments.type#.#arguments.field#" );
+		}
+	}
+
+}

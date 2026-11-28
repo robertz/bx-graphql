@@ -41,6 +41,26 @@ class {
 		return inheritedMembers( arguments.meta, "functions" );
 	}
 
+	/**
+	 * What @graphqlRequires asks of one member: its own annotation, even when empty, else
+	 * the class's. BoxLang doesn't hand a class's annotations down to its children, so the
+	 * class's is looked for up through its parents, and the nearest applies.
+	 *
+	 * @return { guarded, requirement }
+	 */
+	struct function requirementOf( required struct memberAnnotations, required struct classMeta ){
+		if( structKeyExists( arguments.memberAnnotations, "graphqlRequires" ) ){
+			return { "guarded" : true, "requirement" : arguments.memberAnnotations.graphqlRequires };
+		}
+		var guardClass = arguments.classMeta;
+		while( !structIsEmpty( guardClass ) && !structKeyExists( guardClass.annotations ?: {}, "graphqlRequires" ) ){
+			guardClass = guardClass.extends ?: {};
+		}
+		return structIsEmpty( guardClass )
+			? { "guarded" : false, "requirement" : "" }
+			: { "guarded" : true, "requirement" : guardClass.annotations.graphqlRequires };
+	}
+
 	private array function inheritedMembers( required struct meta, required string kind ){
 		var members = structIsEmpty( arguments.meta.extends ?: {} ) ? [] : inheritedMembers( arguments.meta.extends, arguments.kind );
 		for( var declared in arguments.meta[ arguments.kind ] ?: [] ){

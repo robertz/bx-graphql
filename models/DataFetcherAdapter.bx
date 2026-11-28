@@ -21,6 +21,8 @@ class {
 	property name="javaClass";
 	property name="classFiles";
 
+	variables.authorizer               = "";
+	variables.guards                   = {};
 	variables.resolverInstance         = "";
 	variables.hasResolver              = false;
 	variables.resolverChecked          = false;
@@ -31,13 +33,52 @@ class {
 		required string typeName,
 		required string resolverBasePackage,
 		required any javaClass,
-		any classFiles
+		any classFiles,
+		struct guards = {},
+		any authorizer = ""
 	){
 		variables.classFiles          = arguments.classFiles ?: new "ClassFiles"();
 		variables.typeName            = arguments.typeName;
 		variables.resolverBasePackage = arguments.resolverBasePackage;
 		variables.javaClass           = arguments.javaClass;
+		variables.authorizer          = arguments.authorizer;
+		variables.guards              = guardsWithResolvers( arguments.guards );
+
+		if( !structIsEmpty( variables.guards ) && isSimpleValue( variables.authorizer ) ){
+			throw(
+				type    = "BxGraphQL.ConfigurationException",
+				message = "#variables.guards[ structKeyArray( variables.guards )[ 1 ] ].where# is marked @graphqlRequires, which needs settings.authorizer: ( requirement, context, info ) => boolean."
+			);
+		}
 		return this;
+	}
+
+	/**
+	 * The type's guarded fields, { fieldName : { requirement, where } }: those given (a
+	 * bean's properties) and the resolver class's guarded methods, read from its
+	 * metadata so nothing is instantiated before the first request.
+	 */
+	private struct function guardsWithResolvers( required struct guards ){
+		var all = duplicate( arguments.guards );
+		if( !resolverFileExists() ){
+			return all;
+		}
+		var meta = variables.classFiles.metadataOf( resolverPath() );
+		for( var fn in variables.classFiles.functionsOf( meta ) ){
+			var guard = variables.classFiles.requirementOf( fn.annotations, meta );
+			if( fn.access == "public" && guard.guarded ){
+				all[ fn.name ] = { "requirement" : guard.requirement, "where" : "#meta.name#.#fn.name#()" };
+			}
+		}
+		return all;
+	}
+
+	private string function resolverPath(){
+		return variables.resolverBasePackage & "/" & variables.typeName & "Resolver";
+	}
+
+	private boolean function resolverFileExists(){
+		return len( variables.resolverBasePackage ) && fileExists( expandPath( resolverPath() & ".bx" ) );
 	}
 
 	/**
@@ -47,13 +88,23 @@ class {
 	any function get( required any environment ){
 		var fieldName = arguments.environment.getField().getName();
 
+		if( structKeyExists( variables.guards, fieldName ) ){
+			new "Authorization"( variables.authorizer ).check(
+				requirement = variables.guards[ fieldName ].requirement,
+				context     = new "RequestContext"().of( arguments.environment ),
+				type        = variables.typeName,
+				field       = fieldName,
+				args        = new "ArgumentValues"().toBoxLang( arguments.environment.getArguments() )
+			);
+		}
+
 		ensureResolverResolved();
 
 		if( variables.hasResolver && structKeyExists( variables.resolverInstance, fieldName ) ){
 			return variables.resolverInstance[ fieldName ](
 				source  = arguments.environment.getSource(),
 				args    = new "ArgumentValues"().toBoxLang( arguments.environment.getArguments() ),
-				context = arguments.environment.getContext(),
+				context = new "RequestContext"().of( arguments.environment ),
 				env     = arguments.environment
 			);
 		}
@@ -97,9 +148,8 @@ class {
 			if( variables.resolverChecked ){
 				return;
 			}
-			var resolverPath = variables.resolverBasePackage & "/" & variables.typeName & "Resolver";
-			if( len( variables.resolverBasePackage ) && fileExists( expandPath( resolverPath & ".bx" ) ) ){
-				variables.resolverInstance = variables.classFiles.build( resolverPath, "resolver" );
+			if( resolverFileExists() ){
+				variables.resolverInstance = variables.classFiles.build( resolverPath(), "resolver" );
 				variables.hasResolver      = true;
 			}
 			variables.resolverChecked = true;

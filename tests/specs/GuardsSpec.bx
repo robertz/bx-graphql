@@ -1,0 +1,135 @@
+/**
+ * @graphqlRequires on a bean's properties and on hand-written resolvers, over
+ * tests/resources/guards. (On service and bean functions: CodeFirstFeaturesSpec.)
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		var root = expandPath( "tests/resources/guards" );
+		variables.asked    = [];
+		var asked          = variables.asked;
+		variables.settings = {
+			"schemaPaths"         : [ root & "/schema.graphqls" ],
+			"modelPaths"          : [ root & "/models" ],
+			"resolverBasePackage" : root & "/resolvers",
+			"structuredErrors"    : true,
+			"authorizer"          : ( requirement, context, info ) => {
+				arrayAppend( asked, info.type & "." & info.field & ":" & requirement );
+				return isStruct( context ) && ( context.roles ?: [] ).contains( requirement );
+			}
+		};
+		variables.graphQLService = new "../../models/GraphQLService"( variables.settings );
+	}
+
+	function run(){
+		describe( "@graphqlRequires on a property", function(){
+
+			it( "refuses the property, and only that one", function(){
+				var result = variables.graphQLService.execute( "{ account { owner balance } }" );
+
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ].message ).toBe( "Not authorized: Account.balance" );
+				expect( result.errors[ 1 ].extensions.type ).toBe( "BxGraphQL.NotAuthorized" );
+				expect( result.data.account.owner ).toBe( "rob" );
+				expect( isNull( result.data.account.balance ) ).toBeTrue();
+			} );
+
+			it( "lets the property through when the authorizer says so", function(){
+				var result = variables.graphQLService.execute( query = "{ account { balance } }", context = { "roles" : [ "admin" ] } );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.account.balance ).toBe( 12.5 );
+			} );
+
+			it( "takes the class's requirement, and the property's own instead", function(){
+				var result = variables.graphQLService.execute( query = "{ payroll { total period } }", context = { "roles" : [ "admin" ] } );
+
+				expect( result.data.payroll.total ).toBe( 900 );
+				expect( isNull( result.data.payroll.period ) ).toBeTrue();
+				expect( arrayLen( result.errors ) ).toBe( 1 );
+				expect( result.errors[ 1 ].path ).toBe( [ "payroll", "period" ] );
+			} );
+
+		} );
+
+		describe( "@graphqlRequires on a hand-written resolver", function(){
+
+			it( "refuses a guarded method without calling it, and leaves the others alone", function(){
+				var result = variables.graphQLService.execute( "{ open locked }" );
+
+				expect( result.data.open ).toBe( "come in" );
+				expect( isNull( result.data.locked ) ).toBeTrue();
+				expect( result.errors[ 1 ].message ).toBe( "Not authorized: Query.locked" );
+			} );
+
+			it( "tells the authorizer the requirement, the context and the field", function(){
+				arrayClear( variables.asked );
+				var result = variables.graphQLService.execute( query = "{ locked }", context = { "roles" : [ "admin" ] } );
+
+				expect( result.data.locked ).toBe( "the safe" );
+				expect( variables.asked ).toBe( [ "Query.locked:admin" ] );
+			} );
+
+			it( "applies the resolver class's requirement to its methods, not to fields read off the parent", function(){
+				var result = variables.graphQLService.execute( "{ staff { name salary } }" );
+
+				expect( result.data.staff.name ).toBe( "Sam" );
+				expect( isNull( result.data.staff.salary ) ).toBeTrue();
+				expect( result.errors[ 1 ].message ).toBe( "Not authorized: Staff.salary" );
+			} );
+
+		} );
+
+		describe( "The context given to execute()", function(){
+
+			it( "reaches a hand-written resolver and a loader", function(){
+				var settings = duplicate( variables.settings ).append( { "loaders" : { "names" : ( keys, context ) => [ "loaded for " & context.name ] } } );
+				var result   = new "../../models/GraphQLService"( settings ).execute( query = "{ whoami viaLoader }", context = { "name" : "rob" } );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.whoami ).toBe( "rob" );
+				expect( result.data.viaLoader ).toBe( "loaded for rob" );
+			} );
+
+			it( "isn't passed through graphql-java's deprecated context", function(){
+				var seen     = [];
+				var settings = duplicate( variables.settings ).append( { "onError" : ( detail ) => arrayAppend( seen, detail ) } );
+				settings.schemaPaths         = [ expandPath( "tests/resources/context/schema.graphqls" ) ];
+				settings.resolverBasePackage = expandPath( "tests/resources/context/resolvers" );
+				structDelete( settings, "modelPaths" );
+				var result = new "../../models/GraphQLService"( settings ).execute( query = "{ carried legacy }", context = { "name" : "rob" } );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.carried ).toBe( "rob" );
+				expect( result.data.legacy ).toBeFalse();
+			} );
+
+		} );
+
+		describe( "Guards without an authorizer", function(){
+
+			it( "fail at construction for a guarded property", function(){
+				var settings = duplicate( variables.settings );
+				structDelete( settings, "authorizer" );
+				settings.resolverBasePackage = expandPath( "tests/resources/resolvers" );
+
+				expect( function(){
+					new "../../models/GraphQLService"( settings );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "balance.*graphqlRequires.*authorizer" );
+			} );
+
+			it( "fail at construction for a guarded resolver", function(){
+				var settings = duplicate( variables.settings );
+				structDelete( settings, "authorizer" );
+				structDelete( settings, "modelPaths" );
+				settings.schemaPaths = [ expandPath( "tests/resources/test-schema.graphqls" ) ];
+
+				expect( function(){
+					new "../../models/GraphQLService"( settings );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "QueryResolver.*graphqlRequires.*authorizer" );
+			} );
+
+		} );
+	}
+
+}

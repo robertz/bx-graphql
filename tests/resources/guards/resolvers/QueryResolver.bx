@@ -1,0 +1,32 @@
+class {
+
+	function open(){
+		return "come in";
+	}
+
+	@graphqlRequires( "admin" )
+	function locked(){
+		return "the safe";
+	}
+
+	function account(){
+		return { "owner" : "rob", "balance" : 12.5 };
+	}
+
+	function payroll(){
+		return new "../models/Payroll"( total = 900, period = "May" );
+	}
+
+	function staff(){
+		return { "name" : "Sam" };
+	}
+
+	function whoami( any source, struct args, any context, any env ){
+		return arguments.context.name;
+	}
+
+	function viaLoader( any source, struct args, any context, any env ){
+		return arguments.env.getDataLoader( "names" ).load( 1 );
+	}
+
+}
