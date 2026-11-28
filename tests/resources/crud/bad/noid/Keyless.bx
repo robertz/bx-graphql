@@ -1,0 +1,7 @@
+@graphqlType
+@graphqlCrud( "GizmoService" )
+class accessors="true" {
+
+	property name="name" type="string";
+
+}

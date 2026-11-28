@@ -1,0 +1,29 @@
+class {
+
+	variables.store  = [:];
+	variables.nextId = 1;
+
+	function get( required numeric gizmoId ){
+		return variables.store[ arguments.gizmoId ] ?: javaCast( "null", "" );
+	}
+
+	array function list(){
+		var store = variables.store;
+		return store.keyArray().map( ( key ) => store[ key ] );
+	}
+
+	function save( required any gizmo, any context ){
+		if( isNull( arguments.gizmo.getId() ) ){
+			arguments.gizmo.setId( variables.nextId++ );
+		}
+		variables.store[ arguments.gizmo.getId() ] = arguments.gizmo;
+		return arguments.gizmo;
+	}
+
+	boolean function delete( required numeric gizmoId ){
+		var had = structKeyExists( variables.store, arguments.gizmoId );
+		structDelete( variables.store, arguments.gizmoId );
+		return had;
+	}
+
+}

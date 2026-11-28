@@ -205,6 +205,8 @@ Only annotated classes are exposed. Within one, every property is a field unless
 | `@graphqlField` or `@graphqlField( "SDL type" )` | function | The function is a field of the type (not the input). See *Functions as fields* below. |
 | `@graphqlImplements( "Node, Named" )` | class | The type `implements` those interfaces. See *Interfaces and unions* below. |
 | `@graphqlEnum( "A, B, C" )` | class | Emit `enum {SimpleName}` with those values, and nothing else from the class. See *Enums* below. |
+| `@graphqlCrud( "ServiceName" )` | class | Generate get, list, save and delete fields, carried out by that service. See *CRUD from a bean* below. |
+| `@graphqlCrudNames( "list=people" )` | class | Rename those fields. |
 | `@graphqlRequires( "what" )` | class, property, function | Guarded: see *Authorization* below. |
 
 An annotation's value needs parentheses: `@graphqlField( "[Tag!]" )`, not `@graphqlField "[Tag!]"`.
@@ -318,7 +320,41 @@ type Mutation {
 - A key given as `null` sets that property to null; a key left out leaves it alone. Both read as null on the bean afterwards, so to tell them apart take `args` as well and look at its keys: `arrayContainsNoCase( structKeyArray( args.input ), "price" )` (`structKeyExists()` is false for a null).
 - One instance of each service class is built at construction time, by `instanceFactory` if given.
 
-No operations are generated from a bean alone: a bean doesn't say how it's loaded or saved.
+No operations are generated from a bean alone: a bean doesn't say how it's loaded or saved. `@graphqlCrud` names the service that does.
+
+### CRUD from a bean
+
+```javascript
+@graphqlType
+@graphqlInput
+@graphqlCrud( "WidgetService" )
+class accessors="true" {
+
+	@graphqlId
+	property name="id" type="numeric";
+
+	property name="name" type="string" required="true";
+
+}
+```
+
+`WidgetService` is a class under `servicePaths`, found by its simple name. Each of these functions it has becomes a field, with no annotation needed on the function:
+
+| Service function | Generated field |
+|---|---|
+| `get( id )` | `widget( id: ID! ): Widget` on `Query` |
+| `list()` | `widgets: [Widget!]!` on `Query` |
+| `save( widget )` | `saveWidget( input: WidgetInput! ): Widget` on `Mutation` |
+| `delete( id )` | `deleteWidget( id: ID! ): Boolean` on `Mutation` |
+
+- A function the service doesn't have makes no field. Neither does `save` when the bean isn't an `@graphqlInput`.
+- The bean needs exactly one `@graphqlId` property; the `id` argument takes that property's name.
+- The functions' parameters can be called anything: the first one that isn't `context`, `env` or `args` receives the id, or the bean filled from the input. `save` creates or updates, as the service sees fit; `delete` answers with the boolean it returns.
+- The list's name is the type's with an `s`. `@graphqlCrudNames( "list=people" )` on the bean renames any of `get`, `list`, `save` and `delete`.
+- `@graphqlRequires` on the service or its functions guards these fields as it does any other.
+- A generated field that a service function already declares fails at construction time.
+
+There is no filtering, sorting or paging: write those as `@graphqlQuery` functions.
 
 ### Mixing with hand-written schema
 
@@ -464,7 +500,7 @@ Depth counts levels of nesting: `{ widget { name } }` is 2. Complexity counts fi
 
 ## Not yet implemented
 
-- Operations (CRUD) generated from a bean alone
+- Filtering, sorting and paging for the lists `@graphqlCrud` generates
 - Interfaces, unions and input unions generated from classes: they are written in SDL (see *Interfaces and unions*)
 - Subscriptions
 
@@ -488,6 +524,7 @@ boxlang run-tests.bxs     # every time after that
 - `tests/specs/CodeFirstSpec.bx` — schema and operations generated from the annotated beans and services under `tests/resources/codefirst`, alone and merged with a hand-written file. `expected.graphqls` there is the SDL they should generate.
 - `tests/specs/CodeFirstFeaturesSpec.bx` — the same fixtures: enums, bean functions as fields, inherited functions, defaults and deprecation, lists and nulls in inputs, authorization, structured errors, batch loaders, `instanceFactory`'s kinds.
 - `tests/specs/AbstractTypesSpec.bx` — interfaces and unions, over `tests/resources/abstract`.
+- `tests/specs/CrudSpec.bx` — `@graphqlCrud`, over `tests/resources/crud`.
 - `tests/specs/ErrorMaskingSpec.bx` — `maskErrors`, as `true` and as a function.
 - `tests/specs/HandleSpec.bx` — `handle()`: request bodies as structs and as JSON, and the ones it refuses.
 - `tests/specs/GuardsSpec.bx` — `@graphqlRequires` on properties and hand-written resolvers, over `tests/resources/guards`, and the context reaching resolvers and loaders.

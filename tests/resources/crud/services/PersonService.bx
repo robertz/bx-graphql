@@ -1,0 +1,17 @@
+class {
+
+	@graphqlRequires( "admin" )
+	function get( required numeric personId ){
+		return { "id" : arguments.personId, "name" : "Ada" };
+	}
+
+	array function list(){
+		return [ { "id" : 1, "name" : "Ada" } ];
+	}
+
+	// Person has no input, so this makes no mutation
+	function save( required any person ){
+		return arguments.person;
+	}
+
+}

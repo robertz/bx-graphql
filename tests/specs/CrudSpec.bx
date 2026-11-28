@@ -1,0 +1,96 @@
+/**
+ * @graphqlCrud: operations generated from a bean, carried out by the service it names,
+ * over tests/resources/crud.
+ */
+class extends="testbox.system.BaseSpec" {
+
+	function beforeAll(){
+		variables.root     = expandPath( "tests/resources/crud" );
+		variables.settings = {
+			"modelPaths"   : [ variables.root & "/models" ],
+			"servicePaths" : [ variables.root & "/services" ],
+			"authorizer"   : ( requirement, context, info ) => isStruct( context ) && ( context.roles ?: [] ).contains( requirement )
+		};
+		variables.graphQLService = new "../../models/GraphQLService"( variables.settings );
+	}
+
+	function run(){
+		describe( "@graphqlCrud", function(){
+
+			it( "declares a field for each of get, list, save and delete the service has", function(){
+				var sdl = variables.graphQLService.getGeneratedSDL();
+
+				expect( sdl ).toInclude( "gizmo( id: ID! ): Gizmo" );
+				expect( sdl ).toInclude( "gizmos: [Gizmo!]!" );
+				expect( sdl ).toInclude( "saveGizmo( input: GizmoInput! ): Gizmo" );
+				expect( sdl ).toInclude( "deleteGizmo( id: ID! ): Boolean" );
+			} );
+
+			it( "saves through the service, which receives the bean, then gets and lists what was saved", function(){
+				var saved = variables.graphQLService.execute( 'mutation { saveGizmo( input: { name: "Sprocket" } ) { id name } }' );
+				expect( saved.errors ).toBeEmpty();
+				expect( saved.data.saveGizmo.name ).toBe( "Sprocket" );
+
+				var found = variables.graphQLService.execute(
+					query          = "query( $id: ID! ){ gizmo( id: $id ) { name } gizmos { id } }",
+					queryVariables = { "id" : saved.data.saveGizmo.id }
+				);
+				expect( found.errors ).toBeEmpty();
+				expect( found.data.gizmo.name ).toBe( "Sprocket" );
+				expect( found.data.gizmos.map( ( gizmo ) => gizmo.id ) ).toInclude( saved.data.saveGizmo.id );
+			} );
+
+			it( "deletes through the service and answers with what it returned", function(){
+				var id     = variables.graphQLService.execute( 'mutation { saveGizmo( input: { name: "Doomed" } ) { id } }' ).data.saveGizmo.id;
+				var result = variables.graphQLService.execute( 'mutation { first: deleteGizmo( id: "#id#" ) again: deleteGizmo( id: "#id#" ) }' );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.first ).toBeTrue();
+				expect( result.data.again ).toBeFalse();
+				expect( isNull( variables.graphQLService.execute( '{ gizmo( id: "#id#" ) { name } }' ).data.gizmo ) ).toBeTrue();
+			} );
+
+			it( "takes the names @graphqlCrudNames gives", function(){
+				var result = variables.graphQLService.execute( query = "{ people { name } personById( id: 3 ) { id } }", context = { "roles" : [ "admin" ] } );
+
+				expect( result.errors ).toBeEmpty();
+				expect( result.data.people[ 1 ].name ).toBe( "Ada" );
+				expect( result.data.personById.id ).toBe( "3" );
+			} );
+
+			it( "leaves out what the service has no function for, and save when the bean is no input", function(){
+				var sdl = variables.graphQLService.getGeneratedSDL();
+
+				expect( sdl ).notToInclude( "deletePerson" );
+				expect( sdl ).notToInclude( "savePerson" );
+			} );
+
+			it( "guards a field with the service function's @graphqlRequires", function(){
+				var result = variables.graphQLService.execute( "{ personById( id: 3 ) { id } }" );
+
+				expect( isNull( result.data.personById ) ).toBeTrue();
+				expect( result.errors[ 1 ] ).toInclude( "Not authorized: Query.personById" );
+			} );
+
+			it( "fails at construction when the service isn't under servicePaths", function(){
+				expect( function(){
+					new "../../models/GraphQLService"( { "modelPaths" : [ variables.root & "/bad/noservice" ], "servicePaths" : [ variables.root & "/services" ] } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Orphan.*NoSuchService" );
+			} );
+
+			it( "fails at construction when the bean has no @graphqlId property", function(){
+				expect( function(){
+					new "../../models/GraphQLService"( { "modelPaths" : [ variables.root & "/bad/noid" ], "servicePaths" : [ variables.root & "/services" ] } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Keyless.*graphqlId" );
+			} );
+
+			it( "fails at construction when a generated field is already a service's", function(){
+				expect( function(){
+					new "../../models/GraphQLService"( { "modelPaths" : [ variables.root & "/bad/clash" ], "servicePaths" : [ variables.root & "/bad/clash" ] } );
+				} ).toThrow( type = "BxGraphQL.ConfigurationException", regex = "Query\.gizmo is declared twice" );
+			} );
+
+		} );
+	}
+
+}

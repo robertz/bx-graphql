@@ -1,0 +1,12 @@
+/** A small device. */
+@graphqlType
+@graphqlInput
+@graphqlCrud( "GizmoService" )
+class accessors="true" {
+
+	@graphqlId
+	property name="id" type="numeric";
+
+	property name="name" type="string" required="true";
+
+}

@@ -1,0 +1,12 @@
+class {
+
+	function get( required numeric id ){
+		return { "id" : arguments.id };
+	}
+
+	@graphqlQuery
+	string function gizmo(){
+		return "taken";
+	}
+
+}

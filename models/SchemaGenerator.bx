@@ -8,7 +8,8 @@
  *                  hand-written interfaces the type implements. One marked
  *                  @graphqlEnum( "A,B" ) becomes an enum.
  *   servicePaths — public functions marked @graphqlQuery or @graphqlMutation become
- *                  fields of Query or Mutation.
+ *                  fields of Query or Mutation. A bean marked @graphqlCrud( "WidgetService" )
+ *                  gets a field for each of that service's get, list, save and delete.
  *
  * Reads getClassMetadata(), never getMetaData(): with bx-compat-cfml installed the
  * latter folds annotations into the top level and has no `annotations` key at all.
@@ -34,13 +35,15 @@ class {
 	 * @return { sdl,
 	 *           models : { SimpleName : { classPath, meta, typeName, inputName, enumName, enumValues } },
 	 *           operations : [ { rootType, fieldName, classPath ("" = called on the field's source),
-	 *                            methodName, parameters, meta, where, guarded, requirement } ],
+	 *                            methodName, parameters, meta, where, guarded, requirement,
+ *                            sdl? (the field's line, when it isn't read off the function) } ],
 	 *           guards : { TypeName : { propertyName : { requirement, where } } } }
 	 */
 	struct function generate( required array modelPaths, required array servicePaths, required array existingTypeNames ){
 		var models     = modelsIn( arguments.modelPaths );
 		var mapper     = new "TypeMapper"( models );
 		var operations = operationsIn( arguments.servicePaths );
+		arrayAppend( operations, crudOperationsIn( models, arguments.servicePaths, operations ), true );
 		var blocks     = [];
 		var typeTexts  = [];
 		var guards     = {};
@@ -65,7 +68,7 @@ class {
 				arrayAppend(
 					blocks,
 					"#keyword# #rootType# {" & char( 10 )
-						& fields.map( ( operation ) => fieldLine( operation.meta, operation.fieldName, operation.where, mapper, operation.meta.annotations.graphqlReturns ?: "", typeTexts, models ) ).toList( char( 10 ) )
+						& fields.map( ( operation ) => operation.sdl ?: fieldLine( operation.meta, operation.fieldName, operation.where, mapper, operation.meta.annotations.graphqlReturns ?: "", typeTexts, models ) ).toList( char( 10 ) )
 						& char( 10 ) & "}"
 				);
 			}
@@ -171,6 +174,116 @@ class {
 				message = "#claimKey# is declared twice: by #claimants[ 1 ].operation.where# and #claimants[ 2 ].operation.where#."
 			);
 		} );
+	}
+
+	/**
+	 * A bean marked @graphqlCrud( "WidgetService" ) gets a field for each function of that
+	 * name the service has: get( id ), list(), save( bean ), delete( id ). The service is a
+	 * class under servicePaths, found by its simple name. The id is the bean's @graphqlId
+	 * property. Fields are named widget, widgets, saveWidget and deleteWidget unless
+	 * @graphqlCrudNames( "list=people" ) says otherwise.
+	 *
+	 * @declared The operations the services' own annotations gave, to refuse a clash with.
+	 */
+	private array function crudOperationsIn( required struct models, required array servicePaths, required array declared ){
+		var generated = [];
+		var services  = {};
+		for( var classPath in variables.classFiles.under( arguments.servicePaths, "servicePaths" ) ){
+			var serviceMeta = variables.classFiles.metadataOf( classPath );
+			services[ serviceMeta.simpleName ] = { "classPath" : classPath, "meta" : serviceMeta };
+		}
+
+		for( var simpleName in structKeyArray( arguments.models ).sort( "textnocase" ) ){
+			var model = arguments.models[ simpleName ];
+			if( !structKeyExists( model.meta.annotations, "graphqlCrud" ) ){
+				continue;
+			}
+			var serviceName = trim( model.meta.annotations.graphqlCrud );
+			if( !len( model.typeName ) ){
+				throw( type = "BxGraphQL.ConfigurationException", message = "#model.meta.name# is marked @graphqlCrud, which needs @graphqlType as well." );
+			}
+			if( !structKeyExists( services, serviceName ) ){
+				throw(
+					type    = "BxGraphQL.ConfigurationException",
+					message = "#model.meta.name# is marked @graphqlCrud( ""#serviceName#"" ), but no class of that name is under servicePaths."
+				);
+			}
+			var idProperties = variables.classFiles.propertiesOf( model.meta ).filter( ( property ) => structKeyExists( property.annotations, "graphqlId" ) );
+			if( arrayLen( idProperties ) != 1 ){
+				throw(
+					type    = "BxGraphQL.ConfigurationException",
+					message = "#model.meta.name# is marked @graphqlCrud, which needs exactly one @graphqlId property to get and delete by."
+				);
+			}
+
+			var idName    = idProperties[ 1 ].name;
+			var service   = services[ serviceName ];
+			var baseName  = lcase( left( model.typeName, 1 ) ) & mid( model.typeName, 2, len( model.typeName ) );
+			var names     = crudNamesOf( model, { "get" : baseName, "list" : baseName & "s", "save" : "save" & model.typeName, "delete" : "delete" & model.typeName } );
+			var shapes    = {
+				"get"    : { "rootType" : "Query", "argument" : idName, "sdl" : "( #idName#: ID! ): #model.typeName#" },
+				"list"   : { "rootType" : "Query", "argument" : "", "sdl" : ": [#model.typeName#!]!" },
+				"save"   : { "rootType" : "Mutation", "argument" : "input", "sdl" : "( input: #model.inputName#! ): #model.typeName#" },
+				"delete" : { "rootType" : "Mutation", "argument" : idName, "sdl" : "( #idName#: ID! ): Boolean" }
+			};
+
+			for( var fn in variables.classFiles.functionsOf( service.meta ) ){
+				if( !structKeyExists( shapes, fn.name ) || fn.access != "public" || ( fn.name == "save" && !len( model.inputName ) ) ){
+					continue;
+				}
+				var shape     = shapes[ fn.name ];
+				var where     = "#service.meta.name#.#fn.name#() for #model.meta.name#";
+				var operation = operationOf( shape.rootType, names[ fn.name ], service.classPath, fn, service.meta, where );
+				var claimed   = arguments.declared.filter( ( other ) => other.rootType == operation.rootType && other.fieldName == operation.fieldName );
+				arrayAppend( claimed, generated.filter( ( other ) => other.rootType == operation.rootType && other.fieldName == operation.fieldName ), true );
+				if( arrayLen( claimed ) ){
+					throw(
+						type    = "BxGraphQL.ConfigurationException",
+						message = "#operation.rootType#.#operation.fieldName# is declared twice: by #claimed[ 1 ].where# and #where#."
+					);
+				}
+				operation.parameters = crudParametersOf( fn, shape.argument, fn.name == "save" ? simpleName : "", where );
+				operation.sdl        = char( 9 ) & operation.fieldName & shape.sdl;
+				arrayAppend( generated, operation );
+			}
+		}
+		return generated;
+	}
+
+	/**
+	 * The service function's parameters, its first real one told which GraphQL argument
+	 * fills it (the service may call it anything) and, for save, typed as the bean so
+	 * the input arrives as one.
+	 */
+	private array function crudParametersOf( required struct fn, required string argumentName, required string beanType, required string where ){
+		var parameters = duplicate( arguments.fn.parameters );
+		if( !len( arguments.argumentName ) ){
+			return parameters.filter( ( parameter ) => arrayContainsNoCase( static.INJECTED_PARAMETERS, parameter.name ) );
+		}
+		var at = parameters.find( ( parameter ) => !arrayContainsNoCase( static.INJECTED_PARAMETERS, parameter.name ) );
+		if( !at ){
+			throw( type = "BxGraphQL.ConfigurationException", message = "#arguments.where# needs a parameter to receive #arguments.argumentName#." );
+		}
+		parameters[ at ].argumentName = arguments.argumentName;
+		if( len( arguments.beanType ) ){
+			parameters[ at ].type = arguments.beanType;
+		}
+		return parameters.filter( ( parameter, index ) => index == at || arrayContainsNoCase( static.INJECTED_PARAMETERS, parameter.name ) );
+	}
+
+	private struct function crudNamesOf( required struct model, required struct names ){
+		for( var pair in listToArray( arguments.model.meta.annotations.graphqlCrudNames ?: "", "," ) ){
+			var operationName = trim( listFirst( pair, "=" ) );
+			var fieldName     = trim( listRest( pair, "=" ) );
+			if( !structKeyExists( arguments.names, operationName ) || !reFind( static.NAME_PATTERN, fieldName ) ){
+				throw(
+					type    = "BxGraphQL.ConfigurationException",
+					message = "#arguments.model.meta.name#: @graphqlCrudNames takes get, list, save and delete, each with a field name, such as @graphqlCrudNames( ""list=people"" )."
+				);
+			}
+			arguments.names[ operationName ] = fieldName;
+		}
+		return arguments.names;
 	}
 
 	private array function ancestorNamesOf( required struct meta ){

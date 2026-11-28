@@ -1,0 +1,8 @@
+@graphqlType
+@graphqlCrud( "ClashService" )
+class accessors="true" {
+
+	@graphqlId
+	property name="id" type="numeric";
+
+}

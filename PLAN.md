@@ -211,6 +211,14 @@ What a review of the first build found missing, all now in the README:
 - `settings.loaders` (DataLoader batching).
 - `instanceFactory` builds resolvers and input beans too, told which by `kind`.
 
+Added after 0.2.0, all in the README:
+- `operationName`, `handle()`, `maxQueryDepth`, `maxQueryComplexity`, the
+  `introspection` toggle and `maskErrors`.
+- `@graphqlRequires` on properties and hand-written resolvers.
+- `@graphqlCrud( "WidgetService" )`: get, list, save and delete fields from a
+  bean, against the contract sketched under *Operations* above.
+- The app's context carried in `GraphQLContext`.
+
 Not done, and why:
 - BoxLang versions before 1.19.0 and Windows paths are untested; there was
   nowhere to run them.

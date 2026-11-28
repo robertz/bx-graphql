@@ -77,9 +77,9 @@ class {
 				collected[ parameter.name ] = arguments.environment;
 			} else if( parameter.name == "args" ){
 				collected[ parameter.name ] = given;
-			} else if( structKeyExists( given, parameter.name ) && !isNull( given[ parameter.name ] ) ){
-				collected[ parameter.name ] = hydrate( given[ parameter.name ], parameter.type ?: "any", parameter.annotations.graphqlType ?: "" );
-			} else if( arrayContainsNoCase( givenKeys, parameter.name ) && hasDefault( target, parameter ) ){
+			} else if( structKeyExists( given, argumentNameOf( parameter ) ) && !isNull( given[ argumentNameOf( parameter ) ] ) ){
+				collected[ parameter.name ] = hydrate( given[ argumentNameOf( parameter ) ], parameter.type ?: "any", parameter.annotations.graphqlType ?: "" );
+			} else if( arrayContainsNoCase( givenKeys, argumentNameOf( parameter ) ) && hasDefault( target, parameter ) ){
 				throw(
 					type    = "BxGraphQL.NullArgument",
 					message = "#variables.operation.rootType#.#variables.operation.fieldName#: #parameter.name# was given as null, but it has a default, which would be used instead. Leave #parameter.name# out to take the default."
@@ -88,6 +88,11 @@ class {
 		}
 
 		return invoke( target, variables.operation.methodName, collected );
+	}
+
+	/** The GraphQL argument a parameter is filled from: its own name, unless a generated operation (@graphqlCrud) says another. */
+	private string function argumentNameOf( required struct parameter ){
+		return arguments.parameter.argumentName ?: arguments.parameter.name;
 	}
 
 	/**
